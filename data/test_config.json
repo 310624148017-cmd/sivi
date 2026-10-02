@@ -1,0 +1,42 @@
+{
+  "system": {
+    "name": "SIVI",
+    "version": "1.0.0-hackathon",
+    "track": "Track 01: Autonomous Agents for Everyday Apps",
+    "challenge": "Build Fast with AI: AI Build Challenge 2026",
+    "author": "Dharanidharan D - Team Ackerz"
+  },
+  "agent": {
+    "model": "claude-3-5-sonnet-20241022",
+    "temperature": 0.2,
+    "max_tokens": 1500,
+    "demo_timing_seconds": 165,
+    "step_delay_ms": 650,
+    "streaming_chunk_delay_ms": 18,
+    "self_healing": {
+      "enabled": true,
+      "max_retries": 3,
+      "fallback_strategies": ["semantic_label", "aria_role", "text_proximity", "vision_anchor"]
+    }
+  },
+  "safety": {
+    "destructive_actions": [
+      "submit",
+      "submit_application",
+      "payment",
+      "delete",
+      "send_external_email",
+      "clear_database"
+    ],
+    "require_human_signature": true,
+    "audit_log_path": "data/audit_log.jsonl"
+  },
+  "demo_presets": [
+    {
+      "title": "TechCorp SWE Internship (2:45 Demo)",
+      "goal": "Apply for the Software Engineer internship at TechCorp",
+      "url": "http://localhost:8888/mock/techcorp/jobs/swe-intern",
+      "resume_path": "data/resume.pdf"
+    }
+  ]
+}

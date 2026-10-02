@@ -1,0 +1,125 @@
+{
+  "candidate": {
+    "name": "Dharanidharan D",
+    "title": "Lead Autonomous Agent Architect",
+    "email": "dharanidharan.ai@example.com",
+    "phone": "+1 (555) 234-8901",
+    "location": "San Francisco, CA / Hybrid",
+    "linkedin": "https://linkedin.com/in/dharanidharan-ai",
+    "github": "https://github.com/dharanidharan-dev",
+    "portfolio": "https://dharanidharan.dev",
+    "summary": "Full Stack AI Engineer specializing in autonomous agent architectures, multi-agent systems, browser automation with Stagehand/Playwright, and Model Context Protocol (MCP) integrations. Passionate about Human-in-the-Loop AI safety and real-time streaming interfaces.",
+    "skills": {
+      "programming_languages": [
+        "Python",
+        "TypeScript",
+        "JavaScript",
+        "SQL",
+        "HTML5",
+        "CSS3"
+      ],
+      "frameworks_and_backend": [
+        "FastAPI",
+        "Next.js 14",
+        "React",
+        "Node.js",
+        "Starlette",
+        "AsyncIO",
+        "Uvicorn",
+        "Tailwind CSS"
+      ],
+      "ai_and_agents": [
+        "Stagehand SDK",
+        "Anthropic Claude 3.5 Sonnet API",
+        "Model Context Protocol (MCP)",
+        "Playwright",
+        "Chrome DevTools Protocol (CDP)",
+        "LangChain",
+        "LlamaIndex",
+        "Function Calling & Tool Use",
+        "Human-in-the-Loop (HITL) Guardrails"
+      ],
+      "devops_and_tools": [
+        "Docker",
+        "Docker Compose",
+        "Git",
+        "GitHub Actions",
+        "WebSockets",
+        "Server-Sent Events (SSE)",
+        "Kubernetes"
+      ],
+      "custom_skills": [
+        "Python",
+        "FastAPI",
+        "Next.js",
+        "Stagehand",
+        "MCP",
+        "Playwright",
+        "Docker"
+      ]
+    },
+    "education": [
+      {
+        "degree": "B.Tech in Artificial Intelligence & Data Science",
+        "institution": "Institute of Technology",
+        "graduation_year": "2026",
+        "gpa": "3.95 / 4.0",
+        "coursework": [
+          "Autonomous Agent Design",
+          "Advanced Deep Learning",
+          "Distributed Systems",
+          "Full-Stack Web Architectures",
+          "AI Ethics & Safety"
+        ]
+      }
+    ],
+    "experience": [
+      {
+        "role": "AI Engineer & Founder",
+        "company": "SIVI Project / Team Ackerz",
+        "period": "2025 - Present",
+        "highlights": [
+          "Architected SIVI: an autonomous browser agent that automates repetitive web workflows with Claude 3.5 Sonnet, Stagehand, and MCP.",
+          "Implemented real-time token-level reasoning streaming and live browser viewport synchronization over WebSockets.",
+          "Engineered a zero-bypass Human-in-the-Loop (HITL) safety layer preventing unauthorized destructive actions.",
+          "Reduced application completion time from 2-3 hours down to 2-3 minutes with 99.4% locator accuracy."
+        ]
+      },
+      {
+        "role": "Full Stack AI Intern",
+        "company": "Applied AI Labs",
+        "period": "2024 - 2025",
+        "highlights": [
+          "Built high-throughput FastAPI microservices consuming streaming LLM tool-calling APIs.",
+          "Designed interactive Next.js dashboards featuring real-time canvas visualizations and telemetry.",
+          "Integrated Model Context Protocol (MCP) clients to index and retrieve local documents for agent contexts."
+        ]
+      }
+    ],
+    "projects": [
+      {
+        "name": "SIVI: Autonomous Agent for Everyday Apps",
+        "technologies": [
+          "Stagehand",
+          "Claude 3.5 Sonnet",
+          "FastAPI",
+          "Next.js",
+          "MCP",
+          "WebSockets"
+        ],
+        "description": "Autonomous browser agent that parses web pages, retrieves local credentials/resumes via MCP, fills multi-step application forms, and provides real-time streaming reasoning with HITL approval gates."
+      },
+      {
+        "name": "Cleanroom Compliance Sentinel",
+        "technologies": [
+          "Python",
+          "Computer Vision",
+          "Deep Learning",
+          "Streamlit"
+        ],
+        "description": "Real-time compliance monitoring system utilizing visual detector pipelines and temporal state smoothing."
+      }
+    ],
+    "cover_letter_snippet": "I am deeply passionate about building real-world autonomous systems at TechCorp. Having built SIVI with Stagehand, Claude 3.5 Sonnet, and MCP, I have direct hands-on expertise in browser automation primitives, self-healing locators, and Human-in-the-Loop safety. I would love to bring this energy to TechCorp's Applied AI team!"
+  }
+}

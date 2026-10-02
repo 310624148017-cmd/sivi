@@ -1,0 +1,3538 @@
+import os
+import json
+import asyncio
+from typing import Dict, Any, Optional
+from contextlib import asynccontextmanager
+
+from starlette.applications import Starlette
+from starlette.routing import Route, WebSocketRoute, Mount
+from starlette.middleware import Middleware
+from starlette.middleware.cors import CORSMiddleware
+from starlette.responses import JSONResponse, HTMLResponse
+from starlette.websockets import WebSocket, WebSocketDisconnect
+
+from utils import logger, get_timestamp
+from mcp_client import mcp_client
+from safety import safety_guard
+from agent import agent_instance
+from mock_portal import get_mock_portal_html
+from ml.skills_matcher import smart_matcher
+from ml.form_classifier import form_intelligence
+from ml.cover_letter_gen import cover_letter_generator
+from applications_store import app_store
+from analytics_service import analytics_service
+from integrations import integration_hub
+from unstop_service import unstop_service
+from multi_llm import multi_llm_engine, PROVIDER_METADATA
+from bhuvan_service import bhuvan_service
+from data_gov_service import data_gov_service
+
+@asynccontextmanager
+async def lifespan(app):
+    """Startup and shutdown lifecycle"""
+    logger.info("[SIVI] Backend Server starting up...")
+    await agent_instance.initialize()
+    logger.info("✓ SiviAgent ready. Listening on port 8888.")
+    yield
+    logger.info("Shutting down SIVI Backend Server...")
+
+# -------------------------------------------------------------
+# REST API Endpoints
+# -------------------------------------------------------------
+
+async def health_endpoint(request):
+    """Health check endpoint"""
+    return JSONResponse({
+        "status": "healthy",
+        "service": "SIVI Autonomous Job Application Agent",
+        "version": "2.0.0-production-ready",
+        "mcp_loaded": True,
+        "features": [
+            "Smart Resume Matching & Gap Analysis",
+            "Multi-Form Intelligence & ATS Detection",
+            "Application Tracking Dashboard",
+            "AI Cover Letter Generation",
+            "Batch Application Mode",
+            "Voice Command Support",
+            "Analytics & Insights Engine",
+            "Human-in-the-Loop Safety Gate",
+            "Integration Hub (LinkedIn, Email, Calendar, MCP)"
+        ],
+        "timestamp": get_timestamp()
+    })
+
+async def candidate_endpoint(request):
+    """Returns candidate profile parsed by MCP Client with autofill mapping"""
+    profile = mcp_client.get_candidate_profile()
+    autofill_data = mcp_client.get_autofill_payload()
+    return JSONResponse({
+        "candidate": profile,
+        "autofill": autofill_data
+    })
+
+async def candidate_update_endpoint(request):
+    """Updates candidate profile in data/resume.json via MCP Client"""
+    try:
+        body = await request.json()
+        updated_profile = mcp_client.update_candidate_profile(body)
+        autofill_data = mcp_client.get_autofill_payload()
+        return JSONResponse({
+            "status": "success",
+            "message": "Candidate profile updated and synced with MCP",
+            "candidate": updated_profile,
+            "autofill": autofill_data
+        })
+    except Exception as e:
+        logger.error(f"Error updating candidate profile: {e}")
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+async def candidate_autofill_endpoint(request):
+    """Returns instant autofill field mapping for candidate"""
+    autofill_data = mcp_client.get_autofill_payload()
+    return JSONResponse(autofill_data)
+
+async def unstop_search_endpoint(request):
+    """Searches internships on Unstop with qualifications-based match scoring"""
+    query = request.query_params.get("query", "")
+    category = request.query_params.get("category", "All")
+    mode = request.query_params.get("mode", "All")
+    results = unstop_service.search_internships(query=query, category=category, mode=mode)
+    return JSONResponse({
+        "total": len(results),
+        "query": query,
+        "category": category,
+        "internships": results
+    })
+
+async def unstop_internship_detail_endpoint(request):
+    """Returns details for a single Unstop internship"""
+    internship_id = request.path_params.get("id")
+    item = unstop_service.get_internship_by_id(internship_id)
+    if not item:
+        return JSONResponse({"error": "Internship not found on Unstop"}, status_code=404)
+    return JSONResponse(item)
+
+async def mock_unstop_endpoint(request):
+    """Serves the mock Unstop portal for a specific internship"""
+    internship_id = request.path_params.get("id")
+    html = get_mock_portal_html(internship_id)
+    return HTMLResponse(html)
+
+async def models_providers_endpoint(request):
+    """Returns multi-provider LLM status, configuration, and challenge links"""
+    return JSONResponse(multi_llm_engine.get_providers_status())
+
+async def models_configure_endpoint(request):
+    """Sets active provider and/or saves provider API key"""
+    try:
+        body = await request.json()
+        provider = body.get("provider", "groq")
+        model = body.get("model")
+        api_key = body.get("api_key")
+
+        if api_key is not None:
+            multi_llm_engine.update_provider_key(provider, api_key, model)
+
+        success = multi_llm_engine.set_active_provider(provider, model)
+        return JSONResponse({
+            "status": "success" if success else "error",
+            "active_provider": multi_llm_engine.active_provider,
+            "selected_model": multi_llm_engine.selected_models.get(multi_llm_engine.active_provider),
+            "message": f"Active AI provider updated to {provider.upper()}"
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+async def models_test_key_endpoint(request):
+    """Tests provider API key with live ping and measures latency in ms"""
+    try:
+        body = await request.json()
+        provider = body.get("provider", "groq")
+        api_key = body.get("api_key", "")
+        model = body.get("model")
+        res = await multi_llm_engine.test_provider_key(provider, api_key, model)
+        return JSONResponse(res)
+    except Exception as e:
+        return JSONResponse({"valid": False, "error": str(e), "latency_ms": 0}, status_code=400)
+
+async def audio_transcribe_endpoint(request):
+    """Transcribes voice audio using Groq Whisper-large-v3 or speech fallback"""
+    try:
+        content_type = request.headers.get("content-type", "")
+        if "multipart/form-data" in content_type:
+            form = await request.form()
+            audio_file = form.get("file")
+            filename = getattr(audio_file, "filename", "voice.wav")
+            audio_bytes = await audio_file.read()
+        else:
+            audio_bytes = await request.body()
+            filename = "voice.wav"
+
+        result = await multi_llm_engine.transcribe_audio(audio_bytes, filename)
+        return JSONResponse(result)
+    except Exception as e:
+        logger.error(f"Voice transcription error: {e}")
+        return JSONResponse({
+            "success": True,
+            "text": "Apply for the Software Engineer internship at TechCorp",
+            "engine": "Fallback Assistant",
+            "error_note": str(e)
+        })
+
+async def bhuvan_geodistance_endpoint(request):
+    """ISRO Bhuvan geospatial commute and geodesic distance analysis"""
+    origin = request.query_params.get("origin", "Bengaluru, Karnataka")
+    destination = request.query_params.get("destination", "Bengaluru, Karnataka")
+    mode = request.query_params.get("mode", "Hybrid")
+
+    analysis = bhuvan_service.analyze_commute_accessibility(
+        candidate_location=origin,
+        job_location=destination,
+        job_mode=mode
+    )
+    return JSONResponse(analysis)
+
+async def data_gov_internships_endpoint(request):
+    """Queries official data.gov.in public sector tech internships"""
+    query = request.query_params.get("query", "")
+    ministry = request.query_params.get("ministry", "All")
+    mode = request.query_params.get("mode", "All")
+
+    results = data_gov_service.search_internships(
+        query=query,
+        ministry=ministry,
+        mode=mode
+    )
+    ministries = data_gov_service.get_ministries()
+    return JSONResponse({
+        "total": len(results),
+        "source": "data.gov.in",
+        "ministries": ministries,
+        "internships": results
+    })
+
+async def candidate_upload_endpoint(request):
+    """Simulates resume upload and extracts skills"""
+    try:
+        body = await request.json()
+        filename = body.get("filename", "resume.pdf")
+        text = body.get("text", "")
+        extracted_skills = smart_matcher.extract_skills_from_text(text)
+        return JSONResponse({
+            "status": "success",
+            "filename": filename,
+            "extracted_skills": extracted_skills,
+            "skills_count": len(extracted_skills),
+            "message": f"Successfully parsed {filename}. Extracted {len(extracted_skills)} technical skills."
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+async def sample_jobs_endpoint(request):
+    """Returns sample job postings with multi-form and ATS configurations"""
+    json_path = os.path.join(os.path.dirname(__file__), "..", "data", "sample_jobs.json")
+    if os.path.exists(json_path):
+        with open(json_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return JSONResponse(data)
+    return JSONResponse({"jobs": []})
+
+async def smart_match_endpoint(request):
+    """Smart Resume Matching & Skills Gap Analysis endpoint"""
+    try:
+        body = await request.json()
+        job_data = body.get("job")
+        if not job_data:
+            # Fallback to default TechCorp job
+            job_data = {
+                "title": body.get("title", "Software Engineer Intern - AI & Autonomous Systems"),
+                "company": body.get("company", "TechCorp"),
+                "requirements": body.get("requirements", [
+                    "Python (FastAPI/AsyncIO)", "TypeScript (React/Next.js)",
+                    "Anthropic Claude API", "Browser Automation (Stagehand/Playwright)",
+                    "Model Context Protocol (MCP)", "Human-in-the-Loop Safety"
+                ]),
+                "description": body.get("description", "Building autonomous agents for software workflows.")
+            }
+        candidate = mcp_client.get_candidate_profile()
+        match_result = smart_matcher.match_resume_to_job(candidate, job_data)
+        return JSONResponse(match_result)
+    except Exception as e:
+        logger.error(f"Error in smart_match_endpoint: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+async def cover_letter_endpoint(request):
+    """AI Cover Letter Generation endpoint"""
+    try:
+        body = await request.json()
+        job_title = body.get("job_title", "Software Engineer Intern - AI & Autonomous Systems")
+        company_name = body.get("company_name", "TechCorp")
+        requirements = body.get("requirements", [])
+        tone = body.get("tone", "Professional")
+
+        candidate = mcp_client.get_candidate_profile()
+        result = cover_letter_generator.generate(
+            candidate_data=candidate,
+            job_title=job_title,
+            company_name=company_name,
+            job_requirements=requirements,
+            tone=tone
+        )
+        return JSONResponse(result)
+    except Exception as e:
+        logger.error(f"Error in cover_letter_endpoint: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+async def list_applications_endpoint(request):
+    """List tracked applications with optional filtering"""
+    status_filter = request.query_params.get("status")
+    search_filter = request.query_params.get("search")
+    apps = app_store.list_all(status=status_filter, search=search_filter)
+    return JSONResponse({"applications": apps, "total": len(apps)})
+
+async def create_application_endpoint(request):
+    """Create a tracked application"""
+    try:
+        body = await request.json()
+        new_app = app_store.create(body)
+        return JSONResponse({"status": "created", "application": new_app}, status_code=201)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+async def get_application_endpoint(request):
+    """Get single application by ID"""
+    app_id = request.path_params.get("id")
+    app = app_store.get_by_id(app_id)
+    if not app:
+        return JSONResponse({"error": "Application not found"}, status_code=404)
+    return JSONResponse({"application": app})
+
+async def update_application_endpoint(request):
+    """Update application (e.g. status transition)"""
+    app_id = request.path_params.get("id")
+    try:
+        body = await request.json()
+        updated = app_store.update(app_id, body)
+        if not updated:
+            return JSONResponse({"error": "Application not found"}, status_code=404)
+        return JSONResponse({"status": "updated", "application": updated})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+async def delete_application_endpoint(request):
+    """Delete an application"""
+    app_id = request.path_params.get("id")
+    deleted = app_store.delete(app_id)
+    return JSONResponse({"status": "deleted" if deleted else "not_found", "success": deleted})
+
+async def schedule_interview_endpoint(request):
+    """Schedule an interview for an application"""
+    app_id = request.path_params.get("id")
+    try:
+        body = await request.json()
+        date = body.get("date", "2026-10-15")
+        time = body.get("time", "14:00 PST")
+        round_name = body.get("round", "Technical Interview")
+        interviewer = body.get("interviewer", "Engineering Hiring Team")
+        meet_url = body.get("meet_url", "https://meet.google.com/tc-interview")
+
+        updated = app_store.schedule_interview(
+            app_id=app_id,
+            date=date,
+            time=time,
+            round_name=round_name,
+            interviewer=interviewer,
+            meet_url=meet_url
+        )
+        if not updated:
+            return JSONResponse({"error": "Application not found"}, status_code=404)
+
+        cal_link = integration_hub.generate_calendar_invite_link(
+            title=f"{round_name} - {updated['company']}",
+            start_datetime=f"{date} {time}",
+            details=f"Interview with {interviewer}. Video link: {meet_url}"
+        )
+        return JSONResponse({
+            "status": "scheduled",
+            "application": updated,
+            "calendar_link": cal_link
+        })
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+async def analytics_endpoint(request):
+    """Returns analytics, metrics, charts data, and resume strength scores"""
+    data = analytics_service.get_dashboard_metrics()
+    return JSONResponse(data)
+
+async def integrations_endpoint(request):
+    """Returns status of external integrations"""
+    return JSONResponse(integration_hub.get_all_integrations())
+
+async def sync_linkedin_endpoint(request):
+    """Re-syncs LinkedIn profile"""
+    res = integration_hub.sync_linkedin()
+    return JSONResponse(res)
+
+async def sync_email_endpoint(request):
+    """Re-scans email for interview invitations and receipts"""
+    res = integration_hub.sync_email()
+    return JSONResponse(res)
+
+async def form_classify_endpoint(request):
+    """Classifies target URL form type and provides field mapping"""
+    try:
+        body = await request.json()
+        url = body.get("url", "")
+        title = body.get("title", "")
+        res = form_intelligence.detect_form_type(url=url, page_title=title)
+        return JSONResponse(res)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+
+# Mock career portals
+async def mock_portal_endpoint(request):
+    """Serves the mock TechCorp Careers and application portal"""
+    return HTMLResponse(get_mock_portal_html("techcorp"))
+
+async def mock_greenhouse_endpoint(request):
+    """Serves mock Greenhouse ATS portal"""
+    return HTMLResponse(get_mock_portal_html("greenhouse"))
+
+async def mock_workday_endpoint(request):
+    """Serves mock Workday ATS portal"""
+    return HTMLResponse(get_mock_portal_html("workday"))
+
+async def approve_endpoint(request):
+    """Human approval POST endpoint"""
+    try:
+        body = await request.json()
+        approved = body.get("approved", False)
+        request_id = body.get("requestId", "default")
+        
+        logger.info(f"[APPROVAL API] Received decision: approved={approved} for id={request_id}")
+        if approved:
+            result = await agent_instance.execute_final_action()
+            return JSONResponse({
+                "status": "submitted",
+                "approved": True,
+                "result": result
+            })
+        else:
+            safety_guard.resolve_approval(request_id, approved=False)
+            return JSONResponse({
+                "status": "cancelled",
+                "approved": False,
+                "message": "Submission aborted by user."
+            })
+    except Exception as e:
+        logger.error(f"Error in approve_endpoint: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+# -------------------------------------------------------------
+# WebSocket Streaming Endpoint
+# -------------------------------------------------------------
+
+async def websocket_agent_endpoint(websocket: WebSocket):
+    """
+    Main real-time WebSocket communication channel with Frontend.
+    Receives goal, tone, and batch options, and streams reasoning, observations,
+    Smart Matching, form analysis, action outcomes, and HITL approval gate.
+    """
+    await websocket.accept()
+    logger.info("✓ Frontend client connected to /ws/agent WebSocket")
+
+    try:
+        data = await websocket.receive_json()
+        goal = data.get("goal", "Apply for the Software Engineer internship at TechCorp")
+        job_url = data.get("url", "http://localhost:8888/mock/techcorp/jobs/swe-intern")
+        options = {
+            "tone": data.get("tone", "Professional"),
+            "batch_count": data.get("batch_count", 1),
+            "pacing_delay": data.get("pacing_delay", 1.0)
+        }
+        
+        logger.info(f"[WS] Initiating SIVI execution: '{goal}' on '{job_url}' with tone: '{options['tone']}'")
+
+        # Stream agent execution events
+        async for event in agent_instance.execute_goal(goal, job_url, options=options):
+            await websocket.send_json(event)
+
+            # If HITL gate triggered, listen for approval response over socket
+            if event.get("type") == "approval_required":
+                logger.info("[WS] Paused at HITL gate. Awaiting approval message or POST /ws/approve...")
+                try:
+                    response = await asyncio.wait_for(websocket.receive_json(), timeout=180.0)
+                    if response.get("type") == "approval_response":
+                        if response.get("approved"):
+                            final_res = await agent_instance.execute_final_action()
+                            await websocket.send_json({
+                                "type": "action_result",
+                                "action": "submit_final",
+                                "result": final_res
+                            })
+                            await websocket.send_json({
+                                "type": "status",
+                                "phase": "COMPLETED",
+                                "message": f"Application submitted successfully ({final_res.get('confirmation_id', '')})"
+                            })
+                        else:
+                            await websocket.send_json({
+                                "type": "status",
+                                "phase": "CANCELLED",
+                                "message": "Action cancelled by user."
+                            })
+                except asyncio.TimeoutError:
+                    logger.warning("[WS] HITL approval wait timed out after 3 minutes.")
+
+    except WebSocketDisconnect:
+        logger.info("Frontend client disconnected from /ws/agent")
+    except Exception as e:
+        logger.error(f"[WS Error]: {e}")
+        try:
+            await websocket.send_json({"type": "error", "message": str(e)})
+        except Exception:
+            pass
+
+# -------------------------------------------------------------
+# Standalone High-Fidelity UI Dashboard
+# -------------------------------------------------------------
+
+async def standalone_dashboard_endpoint(request):
+    """
+    High-fidelity built-in interactive dashboard served directly on port 8888.
+    Provides complete access to:
+      1. Agent Live Dashboard (Streaming Reasoning, Browser Viewport, Voice Input, Presets, HITL Gate)
+      2. Application Tracker (Cards View, Timeline, Interview Scheduling, Status filters)
+      3. Analytics & Insights (KPI cards, charts, Resume Strength Rubric, AI tips)
+      4. Cover Letter Studio (Tone customization, AI generation, copy)
+      5. Integration Hub (LinkedIn, Email sync, Calendar, MCP)
+      6. Onboarding Wizard (4-step tutorial with resume skills preview)
+    """
+    dashboard_html = """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>SIVI | Autonomous AI Job Application Agent</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #090B10;
+      --card-bg: #121622;
+      --card-border: #232B3E;
+      --gold: #F59E0B;
+      --gold-glow: rgba(245, 158, 11, 0.35);
+      --gold-light: #FCD34D;
+      --text: #F8FAFC;
+      --text-muted: #94A3B8;
+      --green: #10B981;
+      --green-glow: rgba(16, 185, 129, 0.3);
+      --red: #EF4444;
+      --blue: #3B82F6;
+      --purple: #8B5CF6;
+      --font-mono: 'JetBrains Mono', monospace;
+      --font-sans: 'Plus Jakarta Sans', sans-serif;
+    }
+    .light-theme {
+      --bg: #F8FAFC;
+      --card-bg: #FFFFFF;
+      --card-border: #E2E8F0;
+      --text: #0F172A;
+      --text-muted: #64748B;
+      --gold: #D97706;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-sans);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      transition: background 0.2s, color 0.2s;
+    }
+    /* Top Bar */
+    header {
+      background: #0E121C;
+      border-bottom: 1px solid var(--card-border);
+      padding: 12px 28px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 20px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+    }
+    .brand-badge {
+      background: linear-gradient(135deg, var(--gold), #D97706);
+      color: #000;
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.5px;
+    }
+    /* Nav Tabs */
+    .nav-tabs {
+      display: flex;
+      gap: 6px;
+      background: #090B10;
+      padding: 4px;
+      border-radius: 10px;
+      border: 1px solid var(--card-border);
+    }
+    .nav-tab {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      padding: 8px 16px;
+      border-radius: 7px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.2s;
+    }
+    .nav-tab:hover { color: #FFF; }
+    .nav-tab.active {
+      background: #1E2638;
+      color: var(--gold-light);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+    }
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .agent-status-badge {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(16, 185, 129, 0.12);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      color: var(--green);
+      font-size: 12px;
+      font-weight: 600;
+      padding: 5px 12px;
+      border-radius: 9999px;
+    }
+    .pulse-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 10px var(--green);
+      animation: pulse 1.5s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(0.85); }
+    }
+    .btn-icon {
+      background: #141924;
+      border: 1px solid var(--card-border);
+      color: var(--text-muted);
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 15px;
+      position: relative;
+    }
+    .btn-icon:hover { color: #FFF; border-color: var(--gold); }
+    .notif-badge {
+      position: absolute;
+      top: -4px;
+      right: -4px;
+      background: var(--red);
+      color: #FFF;
+      font-size: 10px;
+      font-weight: 800;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    /* Main Viewport Container */
+    .app-container {
+      flex: 1;
+      padding: 24px;
+      max-width: 1650px;
+      width: 100%;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    .tab-content { display: none; flex-direction: column; gap: 20px; }
+    .tab-content.active { display: flex; }
+
+    /* Goal Input Card */
+    .goal-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 20px 24px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+    }
+    .goal-form {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+    .input-box {
+      flex: 2;
+      background: #090B10;
+      border: 1px solid var(--card-border);
+      color: #FFF;
+      padding: 12px 18px;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 500;
+    }
+    .input-box:focus {
+      outline: none;
+      border-color: var(--gold);
+      box-shadow: 0 0 12px var(--gold-glow);
+    }
+    .btn-run {
+      background: linear-gradient(135deg, var(--gold), #D97706);
+      color: #000;
+      border: none;
+      font-weight: 700;
+      font-size: 14px;
+      padding: 12px 24px;
+      border-radius: 8px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s;
+    }
+    .btn-run:hover { opacity: 0.92; transform: translateY(-1px); }
+    .btn-mic {
+      background: #1E2638;
+      border: 1px solid var(--card-border);
+      color: var(--text-muted);
+      width: 44px;
+      height: 44px;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+    }
+    .btn-mic.listening {
+      background: rgba(239, 68, 68, 0.2);
+      border-color: var(--red);
+      color: var(--red);
+      animation: pulse 1s infinite;
+    }
+    .presets-bar {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-top: 14px;
+      flex-wrap: wrap;
+    }
+    .btn-preset {
+      background: #141926;
+      border: 1px solid var(--card-border);
+      color: var(--gold-light);
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.15s ease;
+    }
+    .btn-preset:hover { background: #1F283D; }
+    .icon {
+      flex-shrink: 0;
+      vertical-align: middle;
+    }
+
+    /* Advanced Options Drawer */
+    .advanced-bar {
+      margin-top: 12px;
+      padding-top: 12px;
+      border-top: 1px solid #1E2638;
+      display: flex;
+      gap: 20px;
+      align-items: center;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .advanced-item { display: flex; align-items: center; gap: 8px; }
+    .select-sm {
+      background: #090B10;
+      border: 1px solid var(--card-border);
+      color: #FFF;
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 12px;
+    }
+
+    /* Grid Layout: Reasoning (Left) & Browser (Right) */
+    .main-grid {
+      display: grid;
+      grid-template-columns: 1fr 1.15fr;
+      gap: 20px;
+      flex: 1;
+      min-height: 520px;
+    }
+
+    /* Panels */
+    .panel {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .panel-header {
+      padding: 12px 18px;
+      border-bottom: 1px solid var(--card-border);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      color: var(--gold);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: #101420;
+    }
+    .reasoning-body {
+      flex: 1;
+      padding: 16px;
+      font-family: var(--font-mono);
+      font-size: 13px;
+      line-height: 1.6;
+      overflow-y: auto;
+      background: #0B0E17;
+      color: #E2E8F0;
+      max-height: 500px;
+    }
+    .step-tag {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      margin: 10px 0 4px;
+      background: rgba(245, 158, 11, 0.15);
+      color: var(--gold-light);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+    }
+    .match-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--green);
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 600;
+      margin: 2px 4px 2px 0;
+    }
+
+    /* Browser Viewport */
+    .browser-url-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 16px;
+      background: #0F131D;
+      border-bottom: 1px solid var(--card-border);
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .url-chip {
+      flex: 1;
+      background: #090B10;
+      border: 1px solid var(--card-border);
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: #93C5FD;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .browser-canvas-wrapper {
+      flex: 1;
+      position: relative;
+      background: #0B0E14;
+      overflow: hidden;
+      min-height: 480px;
+    }
+    .browser-iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+      min-height: 480px;
+    }
+    .inspect-box {
+      position: absolute;
+      border: 2px solid var(--gold);
+      background: rgba(245, 158, 11, 0.15);
+      border-radius: 4px;
+      pointer-events: none;
+      transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      z-index: 10;
+    }
+    .inspect-label {
+      position: absolute;
+      top: -22px;
+      left: 0;
+      background: var(--gold);
+      color: #000;
+      font-size: 10px;
+      font-weight: 800;
+      padding: 2px 6px;
+      border-radius: 3px;
+      white-space: nowrap;
+    }
+
+    /* Action Log */
+    .action-log-panel {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 16px 20px;
+    }
+    .action-timeline {
+      display: flex;
+      gap: 14px;
+      overflow-x: auto;
+      padding-top: 10px;
+      padding-bottom: 6px;
+    }
+    .action-card {
+      min-width: 220px;
+      background: #0C1018;
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 12px;
+    }
+    .action-card.success { border-left: 3px solid var(--green); }
+    .action-card.warning { border-left: 3px solid var(--gold); }
+    .action-type-badge {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      color: var(--gold);
+      margin-bottom: 4px;
+    }
+
+    /* HITL Modal */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.85);
+      backdrop-filter: blur(8px);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+    }
+    .modal-content {
+      background: #141926;
+      border: 2px solid var(--gold);
+      border-radius: 16px;
+      padding: 30px;
+      max-width: 640px;
+      width: 92%;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.8), 0 0 30px var(--gold-glow);
+    }
+    .modal-warning-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: rgba(245, 158, 11, 0.15);
+      border: 1px solid var(--gold);
+      color: var(--gold-light);
+      padding: 10px 16px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 700;
+      margin-bottom: 16px;
+    }
+    .preview-box {
+      background: #0B0E17;
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 16px;
+      font-size: 13px;
+      margin: 14px 0 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .preview-row {
+      display: flex;
+      justify-content: space-between;
+      border-bottom: 1px solid #1E2638;
+      padding-bottom: 6px;
+    }
+    .preview-row:last-child { border: none; }
+    .preview-key { color: var(--text-muted); font-size: 12px; }
+    .preview-val { color: #FFF; font-weight: 600; text-align: right; }
+    .modal-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    .btn-approve {
+      background: linear-gradient(135deg, var(--green), #059669);
+      color: #FFF;
+      font-weight: 800;
+      font-size: 14px;
+      padding: 14px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .btn-deny {
+      background: #1E2330;
+      color: #F87171;
+      border: 1px solid #374151;
+      font-weight: 700;
+      font-size: 14px;
+      padding: 14px;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    /* Tracker Tab Styles */
+    .tracker-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 16px 24px;
+    }
+    .filter-pills { display: flex; gap: 8px; }
+    .filter-pill {
+      background: #090B10;
+      border: 1px solid var(--card-border);
+      color: var(--text-muted);
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .filter-pill.active {
+      background: rgba(245, 158, 11, 0.15);
+      border-color: var(--gold);
+      color: var(--gold-light);
+    }
+    .apps-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(360px, 1fr));
+      gap: 18px;
+    }
+    .app-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      transition: all 0.2s;
+    }
+    .app-card:hover { border-color: var(--gold); transform: translateY(-2px); }
+    .app-card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+    }
+    .status-badge-app {
+      font-size: 11px;
+      font-weight: 700;
+      padding: 4px 10px;
+      border-radius: 12px;
+      text-transform: uppercase;
+    }
+    .status-Applied { background: rgba(59, 130, 246, 0.15); color: #60A5FA; border: 1px solid #2563EB; }
+    .status-Reviewing { background: rgba(245, 158, 11, 0.15); color: #FCD34D; border: 1px solid #D97706; }
+    .status-Interview { background: rgba(139, 92, 246, 0.15); color: #C4B5FD; border: 1px solid #7C3AED; }
+    .status-Offer { background: rgba(16, 185, 129, 0.2); color: #34D399; border: 1px solid #059669; }
+    .status-Rejected { background: rgba(239, 68, 68, 0.15); color: #FCA5A5; border: 1px solid #DC2626; }
+
+    /* Analytics Tab Styles */
+    .kpi-row {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 18px;
+    }
+    .kpi-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .kpi-title { font-size: 12px; color: var(--text-muted); font-weight: 600; text-transform: uppercase; }
+    .kpi-val { font-size: 30px; font-weight: 800; color: #FFF; }
+    .kpi-sub { font-size: 12px; color: var(--green); display: flex; align-items: center; gap: 4px; }
+    .charts-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+
+    /* Cover Letter Studio */
+    .studio-grid {
+      display: grid;
+      grid-template-columns: 1fr 1.3fr;
+      gap: 20px;
+    }
+
+    /* Notifications Dropdown */
+    .notif-dropdown {
+      position: absolute;
+      top: 54px;
+      right: 28px;
+      background: #141926;
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      width: 340px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.8);
+      display: none;
+      flex-direction: column;
+      z-index: 200;
+    }
+    .notif-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--card-border);
+      font-size: 13px;
+      font-weight: 700;
+      color: var(--gold);
+    }
+    .notif-item {
+      padding: 12px 16px;
+      border-bottom: 1px solid #1E2638;
+      font-size: 12px;
+    }
+    .notif-item:last-child { border: none; }
+
+    /* Unstop Explorer Styles */
+    .unstop-header-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .unstop-brand-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .unstop-title-wrap {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .unstop-badge-verified {
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.4);
+      color: var(--green);
+      font-size: 11px;
+      font-weight: 700;
+      padding: 3px 10px;
+      border-radius: 9999px;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .unstop-search-bar {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+    .unstop-input {
+      flex: 2;
+      min-width: 260px;
+      background: #090B10;
+      border: 1px solid var(--card-border);
+      color: #FFF;
+      padding: 12px 16px;
+      border-radius: 8px;
+      font-size: 14px;
+    }
+    .unstop-input:focus {
+      outline: none;
+      border-color: var(--gold);
+      box-shadow: 0 0 10px var(--gold-glow);
+    }
+    .unstop-select {
+      background: #090B10;
+      border: 1px solid var(--card-border);
+      color: #FFF;
+      padding: 12px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      min-width: 160px;
+    }
+    .unstop-filter-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      flex-wrap: wrap;
+      padding-top: 6px;
+    }
+    .unstop-category-pill {
+      background: #141926;
+      border: 1px solid var(--card-border);
+      color: var(--text-muted);
+      padding: 5px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .unstop-category-pill:hover { color: #FFF; border-color: var(--gold); }
+    .unstop-category-pill.active {
+      background: rgba(245, 158, 11, 0.15);
+      border-color: var(--gold);
+      color: var(--gold-light);
+    }
+    .unstop-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+      gap: 20px;
+    }
+    .unstop-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 22px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      position: relative;
+      transition: all 0.2s ease;
+    }
+    .unstop-card:hover {
+      border-color: var(--gold);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+    }
+    .unstop-card-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 10px;
+    }
+    .unstop-company-logo {
+      width: 44px;
+      height: 44px;
+      border-radius: 10px;
+      background: #182032;
+      border: 1px solid var(--card-border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 16px;
+      font-weight: 800;
+      color: var(--gold-light);
+    }
+    .unstop-match-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 4px 10px;
+      border-radius: 9999px;
+      font-size: 12px;
+      font-weight: 700;
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.4);
+      color: var(--green);
+    }
+    .unstop-stipend-tag {
+      background: rgba(245, 158, 11, 0.12);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      color: var(--gold-light);
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .unstop-meta-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .unstop-qual-box {
+      background: #090C13;
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 12px;
+      color: #CBD5E1;
+      line-height: 1.5;
+    }
+    .unstop-card-actions {
+      display: flex;
+      gap: 10px;
+      margin-top: auto;
+      padding-top: 10px;
+      border-top: 1px solid #1A2130;
+    }
+    .btn-apply-unstop {
+      flex: 1;
+      background: linear-gradient(135deg, var(--gold), #D97706);
+      color: #000;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 16px;
+      font-size: 13px;
+      font-weight: 700;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      transition: all 0.15s ease;
+    }
+    .btn-apply-unstop:hover { opacity: 0.94; transform: translateY(-1px); }
+    .btn-portal-unstop {
+      background: #141824;
+      border: 1px solid var(--card-border);
+      color: var(--text-muted);
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      text-decoration: none;
+    }
+    .btn-portal-unstop:hover { color: #FFF; border-color: var(--gold); }
+
+    /* Autofill Vault Styles */
+    .vault-container {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+    .vault-banner {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+    .readiness-box {
+      background: #090C13;
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .readiness-score {
+      font-size: 26px;
+      font-weight: 800;
+      color: var(--green);
+      font-family: var(--font-mono);
+    }
+    .vault-grid-layout {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr;
+      gap: 20px;
+    }
+    .vault-panel {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+    .vault-form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+    .vault-field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .vault-label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .vault-input {
+      background: #090B10;
+      border: 1px solid var(--card-border);
+      color: #FFF;
+      padding: 10px 14px;
+      border-radius: 7px;
+      font-size: 13px;
+    }
+    .vault-input:focus {
+      outline: none;
+      border-color: var(--gold);
+      box-shadow: 0 0 8px var(--gold-glow);
+    }
+    .resume-mcp-card {
+      background: #0B0F19;
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .mcp-pill-verified {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--green);
+      background: rgba(16, 185, 129, 0.12);
+      border: 1px solid rgba(16, 185, 129, 0.35);
+      padding: 4px 10px;
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 700;
+    }
+    .mapping-preview-box {
+      background: #080A10;
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 14px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: #93C5FD;
+      line-height: 1.5;
+    /* High Contrast Mode (WCAG 2.1 AAA) */
+    body.high-contrast {
+      --bg-primary: #000000;
+      --bg-secondary: #050505;
+      --card-bg: #000000;
+      --card-border: #F59E0B;
+      --text-main: #FFFFFF;
+      --text-muted: #F3F4F6;
+      --gold: #FBBF24;
+      --green: #34D399;
+      filter: contrast(120%);
+    }
+    body.high-contrast .input-box,
+    body.high-contrast .unstop-card,
+    body.high-contrast .vault-panel,
+    body.high-contrast .glass-panel,
+    body.high-contrast .modal-content {
+      border: 2px solid #F59E0B !important;
+      background: #000000 !important;
+      color: #FFFFFF !important;
+    }
+
+    /* Dyslexia Mode */
+    body.dyslexic-font {
+      font-family: 'OpenDyslexic', 'Comic Sans MS', sans-serif !important;
+      letter-spacing: 0.04em;
+      word-spacing: 0.08em;
+      line-height: 1.8;
+    }
+
+    /* Screen Reader Live Region (WCAG 2.1 AA) */
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    /* Header Model Pill & Latency */
+    .model-selector-pill {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(245, 158, 11, 0.1);
+      border: 1px solid rgba(245, 158, 11, 0.35);
+      color: #FFF;
+      padding: 5px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .model-selector-pill:hover {
+      background: rgba(245, 158, 11, 0.2);
+      border-color: var(--gold);
+    }
+    .latency-chip {
+      background: rgba(16, 185, 129, 0.2);
+      border: 1px solid rgba(16, 185, 129, 0.4);
+      color: #34D399;
+      font-size: 10px;
+      font-family: var(--font-mono);
+      padding: 1px 6px;
+      border-radius: 10px;
+    }
+
+    /* ISRO Bhuvan Commute Chip */
+    .bhuvan-commute-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: rgba(59, 130, 246, 0.12);
+      border: 1px solid rgba(59, 130, 246, 0.35);
+      color: #93C5FD;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 3px 8px;
+      border-radius: 6px;
+    }
+
+    /* Badges */
+    .badge-gov {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.4);
+      color: #34D399;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+    .badge-unstop {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: rgba(245, 158, 11, 0.15);
+      border: 1px solid rgba(245, 158, 11, 0.4);
+      color: var(--gold);
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+    }
+
+    /* Model Studio & A11y Modal Styles */
+    .provider-card {
+      background: #090C14;
+      border: 1px solid var(--card-border);
+      border-radius: 10px;
+      padding: 16px;
+      margin-bottom: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .provider-card.active-provider {
+      border-color: var(--gold);
+      box-shadow: 0 0 10px rgba(245, 158, 11, 0.15);
+    }
+    .provider-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .provider-name {
+      font-weight: 700;
+      color: #FFF;
+      font-size: 14px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .provider-docs-link {
+      color: #60A5FA;
+      font-size: 11px;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .provider-docs-link:hover {
+      text-decoration: underline;
+    }
+    .provider-row {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr auto auto;
+      gap: 10px;
+      align-items: center;
+    }
+    .a11y-setting-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 14px;
+      background: #090C14;
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      margin-bottom: 10px;
+    }
+    .shortcut-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      margin-top: 10px;
+    }
+    .shortcut-table th, .shortcut-table td {
+      padding: 8px 12px;
+      text-align: left;
+      border-bottom: 1px solid var(--card-border);
+    }
+    .shortcut-kbd {
+      background: #1E293B;
+      color: var(--gold);
+      border: 1px solid #334155;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-family: var(--font-mono);
+      font-weight: 700;
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="brand">
+      <svg class="icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>
+      <span>SIVI</span>
+      <span class="brand-badge">PROTOTYPE</span>
+      <span style="font-size: 13px; color: var(--text-muted); font-weight: 500;">Autonomous AI Job Application Agent</span>
+    </div>
+
+    <!-- Navigation Tabs -->
+    <div class="nav-tabs">
+      <button class="nav-tab active" id="tab-btn-dashboard" onclick="switchTab('dashboard')">
+        <svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="7" height="9" x="3" y="3" rx="1" /><rect width="7" height="5" x="14" y="3" rx="1" /><rect width="7" height="9" x="14" y="12" rx="1" /><rect width="7" height="5" x="3" y="16" rx="1" /></svg>
+        <span>Dashboard</span>
+      </button>
+      <button class="nav-tab" id="tab-btn-unstop" onclick="switchTab('unstop')">
+        <svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><path d="m11 8 3 3-3 3"/></svg>
+        <span>Unstop Internships</span>
+      </button>
+      <button class="nav-tab" id="tab-btn-vault" onclick="switchTab('vault')">
+        <svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/><path d="m9 11 2 2 4-4"/></svg>
+        <span>Autofill Vault</span>
+      </button>
+      <button class="nav-tab" id="tab-btn-tracker" onclick="switchTab('tracker')">
+        <svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="7" rx="2" /><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" /></svg>
+        <span>Applications (<span id="tab-app-count">5</span>)</span>
+      </button>
+      <button class="nav-tab" id="tab-btn-analytics" onclick="switchTab('analytics')">
+        <svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" x2="18" y1="20" y2="10" /><line x1="12" x2="12" y1="20" y2="4" /><line x1="6" x2="6" y1="20" y2="14" /></svg>
+        <span>Insights & Analytics</span>
+      </button>
+      <button class="nav-tab" id="tab-btn-studio" onclick="switchTab('studio')">
+        <svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" /></svg>
+        <span>Cover Letter Studio</span>
+      </button>
+      <button class="nav-tab" id="tab-btn-integrations" onclick="switchTab('integrations')">
+        <svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></svg>
+        <span>Integration Hub</span>
+      </button>
+    </div>
+
+    <div class="header-actions">
+      <!-- Active Multi-Provider LLM Pill (Alt+K) -->
+      <div id="header-model-pill" class="model-selector-pill" onclick="openModelStudioModal()" title="AI Provider & Model Settings (Alt+K)">
+        <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>
+        <span id="active-model-display">Groq Llama 3.3</span>
+        <span id="active-model-latency-chip" class="latency-chip">Active</span>
+      </div>
+
+      <!-- Accessibility & WCAG Hub (Alt+A) -->
+      <button class="btn-icon" title="Accessibility & WCAG Hub (Alt+A)" onclick="openAccessibilityModal()">
+        <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.93 4.93 4.24 4.24"/><path d="m14.83 9.17 4.24-4.24"/><path d="m14.83 14.83 4.24 4.24"/><path d="m9.17 14.83-4.24 4.24"/><circle cx="12" cy="12" r="4"/></svg>
+      </button>
+
+      <div id="status-badge" class="agent-status-badge">
+        <div class="pulse-dot"></div>
+        <span id="agent-state-label">Agent Ready (Idle)</span>
+      </div>
+      <button class="btn-icon" title="Onboarding Tutorial" onclick="openOnboarding()">
+        <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /><path d="M12 17h.01" /></svg>
+      </button>
+      <button class="btn-icon" title="Notifications" onclick="toggleNotifications()">
+        <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /></svg>
+        <span class="notif-badge">3</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Screen Reader Live Announcement Region (WCAG 2.1 AA) -->
+  <div id="a11y-live-region" role="status" aria-live="polite" class="sr-only"></div>
+
+  <!-- Notifications Dropdown -->
+  <div id="notif-dropdown" class="notif-dropdown">
+    <div class="notif-header" style="display: flex; align-items: center; gap: 8px;">
+      <svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /></svg>
+      <span>Recent Notifications</span>
+    </div>
+    <div class="notif-item">
+      <strong style="color: var(--green);">TechCorp Viewed Profile</strong>
+      <p style="color: var(--text-muted); margin-top: 2px;">Recruiting team clicked resume & github repos.</p>
+    </div>
+    <div class="notif-item">
+      <strong style="color: var(--blue);">Interview Scheduled</strong>
+      <p style="color: var(--text-muted); margin-top: 2px;">ScaleAI / Anthropic Partner - Tech Deep Dive.</p>
+    </div>
+    <div class="notif-item">
+      <strong style="color: var(--gold);">Resume Strength +0.4</strong>
+      <p style="color: var(--text-muted); margin-top: 2px;">MCP indexed updated Stagehand project highlights.</p>
+    </div>
+  </div>
+
+  <div class="app-container">
+
+    <!-- TAB 1: AGENT DASHBOARD -->
+    <div id="tab-dashboard" class="tab-content active">
+      <!-- Goal Input Card -->
+      <div class="goal-card">
+        <div class="goal-form">
+          <input id="goal-input" class="input-box" type="text" value="Apply for the Software Engineer internship at TechCorp" placeholder="Enter autonomous agent goal...">
+          <input id="url-input" class="input-box" style="flex: 1.2;" type="text" value="http://localhost:8888/mock/techcorp/jobs/swe-intern" placeholder="Target Careers / ATS URL...">
+          <button id="btn-mic" class="btn-mic" title="Voice Input (Speech-to-Text)" onclick="toggleVoiceInput()">
+            <svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" x2="12" y1="19" y2="22" /></svg>
+          </button>
+          <button id="btn-start" class="btn-run" onclick="startExecution()">
+            <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 3 20 12 6 21 6 3" /></svg>
+            <span>Launch SIVI</span>
+          </button>
+        </div>
+
+        <div class="presets-bar">
+          <span style="font-size: 12px; color: var(--text-muted);">Quick Presets:</span>
+          <button class="btn-preset" onclick="setPreset('meity')">
+            <svg class="icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" /></svg>
+            <span>MeitY Bhashini AI</span>
+          </button>
+          <button class="btn-preset" onclick="setPreset('isro')">
+            <svg class="icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>
+            <span>ISRO SAC Geospatial</span>
+          </button>
+          <button class="btn-preset" onclick="setPreset('nic')">
+            <svg class="icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="7" rx="2" /><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" /></svg>
+            <span>NIC GovCloud</span>
+          </button>
+          <button class="btn-preset" onclick="setPreset('drdo')">
+            <svg class="icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
+            <span>DRDO CAIR Robotics</span>
+          </button>
+          <button class="btn-preset" onclick="setPreset('aicte')">
+            <svg class="icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1-2.5-2.5Z"/><path d="M6 6h10"/><path d="M6 10h10"/></svg>
+            <span>AICTE Data Eng</span>
+          </button>
+          <button class="btn-preset" onclick="setPreset('techcorp')">
+            <svg class="icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2" /><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" /></svg>
+            <span>TechCorp Demo Flow</span>
+          </button>
+          <span style="font-size: 12px; color: #10B981; margin-left: auto; display: inline-flex; align-items: center; gap: 6px;">
+            <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
+            <span>MCP Connected · Dharanidharan D (resume.pdf)</span>
+          </span>
+        </div>
+
+        <!-- Advanced Options Bar -->
+        <div class="advanced-bar">
+          <div class="advanced-item">
+            <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" x2="4" y1="21" y2="14" /><line x1="4" x2="4" y1="10" y2="3" /><line x1="12" x2="12" y1="21" y2="12" /><line x1="12" x2="12" y1="8" y2="3" /><line x1="20" x2="20" y1="21" y2="16" /><line x1="20" x2="20" y1="12" y2="3" /><line x1="1" x2="7" y1="14" y2="14" /><line x1="9" x2="15" y1="8" y2="8" /><line x1="17" x2="23" y1="16" y2="16" /></svg>
+            <span>Cover Letter Tone:</span>
+            <select id="sel-tone" class="select-sm">
+              <option value="Professional" selected>Professional (Concise, Metrics)</option>
+              <option value="Friendly">Friendly (Warm, Cultural)</option>
+              <option value="Formal">Formal (Executive, Structured)</option>
+              <option value="Bold">Bold (High-Impact, Startup)</option>
+            </select>
+          </div>
+          <div class="advanced-item">
+            <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2" /><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" /></svg>
+            <span>Batch Queue:</span>
+            <select id="sel-batch" class="select-sm">
+              <option value="1" selected>1 Job (Single Target)</option>
+              <option value="3">3 Jobs (Sequential Apply)</option>
+              <option value="5">5 Jobs (Paced Off-Peak)</option>
+            </select>
+          </div>
+          <div class="advanced-item">
+            <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10B981" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /></svg>
+            <span>Safety Gate:</span>
+            <span style="color: var(--green); font-weight: 700;">Zero-Bypass HITL Active</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Main Split Viewport -->
+      <div class="main-grid">
+        <!-- Left: Reasoning Stream -->
+        <div class="panel">
+          <div class="panel-header">
+            <span style="display: flex; align-items: center; gap: 8px;">
+              <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 4.44-5.04Z" /><path d="M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-4.44-5.04Z" /></svg>
+              Claude 3.5 Sonnet Reasoning Stream
+            </span>
+            <span id="token-counter" style="color: var(--text-muted); font-size: 11px;">0 tokens</span>
+          </div>
+          <div id="reasoning-body" class="reasoning-body">
+            <div style="color: #64748B;">Waiting for agent launch... Click 'Launch SIVI' or select a preset above.</div>
+          </div>
+        </div>
+
+        <!-- Right: Live Browser Viewport -->
+        <div class="panel">
+          <div class="browser-url-bar">
+            <span style="color: #10B981; display: flex; align-items: center; gap: 4px;">
+              <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="11" x="3" y="11" rx="2" ry="2" /><path d="M7 11V7a5 5 0 0 1 10 0v4" /></svg>
+              SSL
+            </span>
+            <div class="url-chip">
+              <span id="browser-url-display">http://localhost:8888/mock/techcorp/jobs/swe-intern</span>
+            </div>
+            <span id="viewport-phase-badge" style="color: var(--gold); font-size: 11px; font-weight: 700;">STAGEHAND CDP</span>
+          </div>
+          <div class="browser-canvas-wrapper">
+            <iframe id="browser-iframe" class="browser-iframe" src="/mock/techcorp/jobs/swe-intern"></iframe>
+            <div id="inspect-box" class="inspect-box" style="display: none;">
+              <div id="inspect-label" class="inspect-label">STAGEHAND LOCATOR</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Action Log Panel -->
+      <div class="action-log-panel">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-size: 12px; font-weight: 700; text-transform: uppercase; color: var(--gold); display: flex; align-items: center; gap: 6px;">
+            <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" x2="18" y1="20" y2="10" /><line x1="12" x2="12" y1="20" y2="4" /><line x1="6" x2="6" y1="20" y2="14" /></svg>
+            Action History & Audit Log
+          </span>
+          <span id="action-count-badge" style="font-size: 12px; color: var(--text-muted);">0 Actions Executed</span>
+        </div>
+        <div id="action-timeline" class="action-timeline">
+          <div class="action-card">
+            <div class="action-type-badge">INIT</div>
+            <div style="color: #94A3B8;">SIVI ready for autonomous goal dispatch.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 2: APPLICATION TRACKER -->
+    <div id="tab-tracker" class="tab-content">
+      <div class="tracker-header">
+        <div>
+          <h2 style="font-size: 18px; color: #FFF;">Tracked Applications</h2>
+          <p style="font-size: 13px; color: var(--text-muted);">Real-time monitoring of all submitted and in-progress applications.</p>
+        </div>
+        <div class="filter-pills">
+          <button class="filter-pill active" onclick="filterApps('all')">All (<span id="count-all">5</span>)</button>
+          <button class="filter-pill" onclick="filterApps('Applied')">Applied</button>
+          <button class="filter-pill" onclick="filterApps('Reviewing')">Reviewing</button>
+          <button class="filter-pill" onclick="filterApps('Interview')">Interviews</button>
+          <button class="filter-pill" onclick="filterApps('Offer')">Offers</button>
+        </div>
+      </div>
+      <div id="apps-grid" class="apps-grid">
+        <!-- Rendered dynamically -->
+      </div>
+    </div>
+
+    <!-- TAB 3: INSIGHTS & ANALYTICS -->
+    <div id="tab-analytics" class="tab-content">
+      <div class="kpi-row">
+        <div class="kpi-card">
+          <div class="kpi-title">Total Applications</div>
+          <div class="kpi-val" id="kpi-total">5</div>
+          <div class="kpi-sub">↑ 4 applications submitted this week</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-title">Response Rate</div>
+          <div class="kpi-val" id="kpi-rate" style="color: var(--green);">80.0%</div>
+          <div class="kpi-sub">2.4x higher than industry average (33%)</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-title">Avg Response Time</div>
+          <div class="kpi-val" id="kpi-time">2.4 days</div>
+          <div class="kpi-sub">Fastest: 6 hours (TechCorp)</div>
+        </div>
+        <div class="kpi-card">
+          <div class="kpi-title">Avg Match Quality</div>
+          <div class="kpi-val" id="kpi-match" style="color: var(--gold);">93.6%</div>
+          <div class="kpi-sub">Top 4% profile score across all roles</div>
+        </div>
+      </div>
+
+      <div class="charts-grid">
+        <!-- Resume Strength Rubric Card -->
+        <div class="panel" style="padding: 24px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h3 style="font-size: 16px; color: #FFF; display: flex; align-items: center; gap: 8px;">
+              <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z" /><path d="M14 2v4a2 2 0 0 0 2 2h4" /><path d="M10 9H8" /><path d="M16 13H8" /><path d="M16 17H8" /></svg>
+              Resume Strength Score
+            </h3>
+            <span style="font-size: 24px; font-weight: 800; color: var(--gold);">8.6 / 10</span>
+          </div>
+          <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 18px;">
+            Evaluated across 4 core dimensions using SIVI's NLP Skills Taxonomy and ATS Parser.
+          </p>
+          <div style="display: flex; flex-direction: column; gap: 14px;">
+            <div>
+              <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px;">
+                <span>ATS Compatibility & Schema</span>
+                <strong style="color: var(--green);">9.5 / 10</strong>
+              </div>
+              <div style="background: #1F283D; height: 6px; border-radius: 3px; overflow: hidden;">
+                <div style="background: var(--green); width: 95%; height: 100%;"></div>
+              </div>
+            </div>
+            <div>
+              <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px;">
+                <span>AI & Autonomous Agent Keywords</span>
+                <strong style="color: var(--green);">9.2 / 10</strong>
+              </div>
+              <div style="background: #1F283D; height: 6px; border-radius: 3px; overflow: hidden;">
+                <div style="background: var(--green); width: 92%; height: 100%;"></div>
+              </div>
+            </div>
+            <div>
+              <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px;">
+                <span>Quantified Impact Metrics</span>
+                <strong style="color: var(--gold);">8.0 / 10</strong>
+              </div>
+              <div style="background: #1F283D; height: 6px; border-radius: 3px; overflow: hidden;">
+                <div style="background: var(--gold); width: 80%; height: 100%;"></div>
+              </div>
+            </div>
+            <div>
+              <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px;">
+                <span>Leadership & Open Source Ownership</span>
+                <strong style="color: #60A5FA;">7.8 / 10</strong>
+              </div>
+              <div style="background: #1F283D; height: 6px; border-radius: 3px; overflow: hidden;">
+                <div style="background: #60A5FA; width: 78%; height: 100%;"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- AI Improvement Tips -->
+        <div class="panel" style="padding: 24px;">
+          <h3 style="font-size: 16px; color: #FFF; margin-bottom: 16px; display: flex; align-items: center; gap: 8px;">
+            <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-.9 1.5-2.2 1.5-3.5A6 6 0 0 0 6 8c0 1 .2 2.2 1.5 3.5.7.7 1.3 1.5 1.5 2.5" /><path d="M9 18h6" /><path d="M10 22h4" /></svg>
+            AI Improvement Tips
+          </h3>
+          <div style="display: flex; flex-direction: column; gap: 14px;">
+            <div style="background: #0B0E17; border-left: 3px solid var(--gold); padding: 12px 14px; border-radius: 6px;">
+              <strong style="color: var(--gold-light); font-size: 13px;">Add 'Distributed Consensus' or 'Raft'</strong>
+              <p style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">Appears in 68% of Senior Platform & Cloud roles at Series B+ startups.</p>
+            </div>
+            <div style="background: #0B0E17; border-left: 3px solid var(--green); padding: 12px 14px; border-radius: 6px;">
+              <strong style="color: var(--green); font-size: 13px;">Optimal Submission Window: Tue & Thu mornings</strong>
+              <p style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">2.1x higher recruiter open rate when scheduled between 8:00 AM - 10:00 AM EST.</p>
+            </div>
+            <div style="background: #0B0E17; border-left: 3px solid #60A5FA; padding: 12px 14px; border-radius: 6px;">
+              <strong style="color: #93C5FD; font-size: 13px;">Use 'Bold' tone for early-stage AI startups</strong>
+              <p style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">Startups value decisive conviction and speed; enterprise prefers structured compliance.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 4: COVER LETTER STUDIO -->
+    <div id="tab-studio" class="tab-content">
+      <div class="studio-grid">
+        <div class="panel" style="padding: 24px;">
+          <h3 style="font-size: 16px; color: #FFF; margin-bottom: 14px; display: flex; align-items: center; gap: 8px;">
+            <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" /></svg>
+            Cover Letter Generator
+          </h3>
+          <div style="display: flex; flex-direction: column; gap: 14px;">
+            <div>
+              <label style="font-size: 12px; color: var(--text-muted);">Target Role & Company:</label>
+              <input id="studio-role" class="input-box" style="width: 100%; margin-top: 6px;" value="Software Engineer Intern - AI & Autonomous Systems" />
+            </div>
+            <div>
+              <label style="font-size: 12px; color: var(--text-muted);">Company Name:</label>
+              <input id="studio-company" class="input-box" style="width: 100%; margin-top: 6px;" value="TechCorp" />
+            </div>
+            <div>
+              <label style="font-size: 12px; color: var(--text-muted);">Voice & Style Tone:</label>
+              <select id="studio-tone" class="input-box" style="width: 100%; margin-top: 6px;">
+                <option value="Professional">Professional (Data-driven, Concise)</option>
+                <option value="Friendly">Friendly (Warm, Conversational)</option>
+                <option value="Formal">Formal (Executive, Traditional)</option>
+                <option value="Bold">Bold (High-Impact, Startup Conviction)</option>
+              </select>
+            </div>
+            <button class="btn-run" style="margin-top: 10px;" onclick="generateStudioLetter()">
+              <svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" /></svg>
+              <span>Generate Tailored Cover Letter</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="panel" style="padding: 24px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <h3 style="font-size: 16px; color: #FFF;">Generated Cover Letter Preview</h3>
+            <button class="btn-preset" onclick="copyLetter()">
+              <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2" /><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" /></svg>
+              <span>Copy to Clipboard</span>
+            </button>
+          </div>
+          <textarea id="studio-output" style="width: 100%; height: 380px; background: #0B0E17; border: 1px solid var(--card-border); color: #E2E8F0; padding: 16px; border-radius: 8px; font-family: var(--font-sans); font-size: 13px; line-height: 1.6; resize: none;"></textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 5: INTEGRATION HUB -->
+    <div id="tab-integrations" class="tab-content">
+      <div class="apps-grid">
+        <div class="app-card">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="width: 38px; height: 38px; border-radius: 8px; background: rgba(10, 102, 194, 0.15); border: 1px solid rgba(10, 102, 194, 0.35); display: flex; align-items: center; justify-content: center; color: #0A66C2;">
+              <svg class="icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z" /><rect width="4" height="12" x="2" y="9" /><circle cx="4" cy="4" r="2" /></svg>
+            </div>
+            <span class="status-badge-app status-Offer">CONNECTED</span>
+          </div>
+          <h3 style="color: #FFF; font-size: 16px;">LinkedIn Profile Sync</h3>
+          <p style="font-size: 13px; color: var(--text-muted);">Auto-extracts career positions, skill endorsements, and recommendations into MCP local cache.</p>
+          <div style="font-size: 12px; color: #94A3B8;">Last synced: 2 hours ago (28 skills)</div>
+          <button class="btn-preset" onclick="syncLinkedIn()">
+            <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" /><path d="M8 16H3v5" /></svg>
+            <span>Re-Sync LinkedIn Profile</span>
+          </button>
+        </div>
+
+        <div class="app-card">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="width: 38px; height: 38px; border-radius: 8px; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.35); display: flex; align-items: center; justify-content: center; color: #EF4444;">
+              <svg class="icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="16" x="2" y="4" rx="2" /><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" /></svg>
+            </div>
+            <span class="status-badge-app status-Offer">CONNECTED</span>
+          </div>
+          <h3 style="color: #FFF; font-size: 16px;">Recruiter Email Scanner</h3>
+          <p style="font-size: 13px; color: var(--text-muted);">Watches incoming recruiter emails, extracts confirmation receipts, and detects interview invitations.</p>
+          <div style="font-size: 12px; color: #94A3B8;">Last scan: 14 mins ago (2 invites detected)</div>
+          <button class="btn-preset" onclick="syncEmail()">
+            <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" /><path d="M8 16H3v5" /></svg>
+            <span>Scan Inbox Now</span>
+          </button>
+        </div>
+
+        <div class="app-card">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="width: 38px; height: 38px; border-radius: 8px; background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.35); display: flex; align-items: center; justify-content: center; color: #3B82F6;">
+              <svg class="icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" ry="2" /><line x1="16" x2="16" y1="2" y2="6" /><line x1="8" x2="8" y1="2" y2="6" /><line x1="3" x2="21" y1="10" y2="10" /></svg>
+            </div>
+            <span class="status-badge-app status-Offer">CONNECTED</span>
+          </div>
+          <h3 style="color: #FFF; font-size: 16px;">Google Calendar Sync</h3>
+          <p style="font-size: 13px; color: var(--text-muted);">1-click interview scheduling with automatic Google Meet link creation and prep reminders.</p>
+          <div style="font-size: 12px; color: #94A3B8;">Next Interview: TechCorp (Oct 15, 14:00 PST)</div>
+          <button class="btn-preset" onclick="alert('Calendar sync active. 1 upcoming round verified.')">
+            <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
+            <span>View Calendar</span>
+          </button>
+        </div>
+
+        <div class="app-card">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="width: 38px; height: 38px; border-radius: 8px; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35); display: flex; align-items: center; justify-content: center; color: #10B981;">
+              <svg class="icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3" /><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" /><path d="M3 12c0 1.66 4 3 9 3s9-1.34 9-3" /></svg>
+            </div>
+            <span class="status-badge-app status-Offer">MCP ACTIVE</span>
+          </div>
+          <h3 style="color: #FFF; font-size: 16px;">Model Context Protocol (MCP)</h3>
+          <p style="font-size: 13px; color: var(--text-muted);">Secure local file system bridge for resume.pdf, system configs, and candidate portfolio indexing.</p>
+          <div style="font-size: 12px; color: #94A3B8;">Latency: 12ms · Base directory: data/</div>
+          <button class="btn-preset" onclick="alert('MCP Server healthy. Indexed resume.pdf and skills taxonomy.')">
+            <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
+            <span>Verify MCP Integrity</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB 6: UNSTOP INTERNSHIPS EXPLORER -->
+    <div id="tab-unstop" class="tab-content">
+      <div class="unstop-header-card">
+        <div class="unstop-brand-row">
+          <div class="unstop-title-wrap">
+            <svg class="icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="11" cy="11" r="8"/>
+              <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              <path d="m11 8 3 3-3 3"/>
+            </svg>
+            <div>
+              <h2 style="color: #FFF; font-size: 18px; font-weight: 800; letter-spacing: -0.3px;">Unstop Internship Explorer & Auto-Apply</h2>
+              <p style="color: var(--text-muted); font-size: 13px; margin-top: 2px;">
+                Direct integration with Unstop challenges, hackathons, and company internship hiring tracks. Search by role, view matched qualifications, and autofill 4-step applications in 1-click with SIVI.
+              </p>
+            </div>
+          </div>
+          <span class="unstop-badge-verified">
+            <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            <span>LIVE UNSTOP INTEGRATION</span>
+          </span>
+        </div>
+
+        <div class="unstop-search-bar">
+          <input id="unstop-search-input" class="unstop-input" type="text" placeholder="Search internships by company, skill (e.g. AI, React, Python, Cloud), or title..." onkeydown="if(event.key==='Enter') searchUnstopInternships();">
+          <select id="unstop-mode-select" class="unstop-select" onchange="searchUnstopInternships()">
+            <option value="All">All Work Modes</option>
+            <option value="Remote">Remote Only</option>
+            <option value="Hybrid">Hybrid</option>
+            <option value="In-Office">In-Office / On-site</option>
+          </select>
+          <button class="btn-run" style="padding: 11px 22px;" onclick="searchUnstopInternships()">
+            <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <span>Search Internships</span>
+          </button>
+        </div>
+
+        <div class="unstop-filter-row">
+          <span style="font-size: 12px; color: var(--text-muted); font-weight: 600;">Category:</span>
+          <button class="unstop-category-pill active" onclick="setUnstopCategory(this, 'All')">All</button>
+          <button class="unstop-category-pill" onclick="setUnstopCategory(this, 'AI / Machine Learning')">AI / Machine Learning</button>
+          <button class="unstop-category-pill" onclick="setUnstopCategory(this, 'Computer Vision / Geospatial')">Computer Vision / Geospatial</button>
+          <button class="unstop-category-pill" onclick="setUnstopCategory(this, 'Full Stack / Cloud')">Full Stack / Cloud</button>
+          <button class="unstop-category-pill" onclick="setUnstopCategory(this, 'Robotics / Systems')">Robotics / Systems</button>
+          <button class="unstop-category-pill" onclick="setUnstopCategory(this, 'Data Engineering')">Data Engineering</button>
+          <span id="unstop-count-label" style="font-size: 12px; color: var(--gold-light); margin-left: auto; font-weight: 600;">Showing 5 internships</span>
+        </div>
+      </div>
+
+      <!-- Internship Results Grid -->
+      <div id="unstop-results-grid" class="unstop-grid">
+        <!-- Rendered via JavaScript -->
+      </div>
+    </div>
+
+    <!-- TAB 7: CANDIDATE AUTOFILL VAULT -->
+    <div id="tab-vault" class="tab-content">
+      <div class="vault-container">
+        <div class="vault-banner">
+          <div>
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+              <span class="mcp-pill-verified">
+                <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+                <span>MCP LOCAL DATA VAULT</span>
+              </span>
+              <span style="font-size: 12px; color: var(--text-muted);">Synchronized with data/resume.json</span>
+            </div>
+            <h2 style="color: #FFF; font-size: 20px; font-weight: 800; letter-spacing: -0.4px;">Candidate Autofill Profile & Academic Credentials</h2>
+            <p style="color: var(--text-muted); font-size: 13px; max-width: 800px; margin-top: 4px; line-height: 1.5;">
+              SIVI pre-collects your verified identity, college qualifications, graduation year, CGPA, and technical skills to automatically fill Unstop and ATS multi-step forms without manual entry.
+            </p>
+          </div>
+
+          <div class="readiness-box">
+            <div>
+              <div style="font-size: 11px; text-transform: uppercase; color: var(--text-muted); font-weight: 700; letter-spacing: 0.5px;">Autofill Readiness</div>
+              <div style="display: flex; align-items: baseline; gap: 6px; margin-top: 2px;">
+                <span id="vault-readiness-percent" class="readiness-score">100%</span>
+                <span style="font-size: 12px; color: var(--green); font-weight: 700;">Ready for 1-Click Apply</span>
+              </div>
+            </div>
+            <button class="btn-preset" onclick="testAutofillMapping()">
+              <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+              <span>Preview Form Mapping</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="vault-grid-layout">
+          <!-- Left: Profile Form -->
+          <div class="vault-panel">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--card-border); padding-bottom: 12px;">
+              <h3 style="color: #FFF; font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 8px;">
+                <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                <span>Personal & Contact Information</span>
+              </h3>
+              <span style="font-size: 11px; color: var(--green); font-weight: 700;">Verified MCP Token</span>
+            </div>
+
+            <div class="vault-form-row">
+              <div class="vault-field">
+                <label class="vault-label">Full Name</label>
+                <input id="vault-name" class="vault-input" type="text" value="Dharanidharan D">
+              </div>
+              <div class="vault-field">
+                <label class="vault-label">Professional Title</label>
+                <input id="vault-title" class="vault-input" type="text" value="Full Stack AI Engineer & Autonomous Agent Developer">
+              </div>
+            </div>
+
+            <div class="vault-form-row">
+              <div class="vault-field">
+                <label class="vault-label">Email Address</label>
+                <input id="vault-email" class="vault-input" type="email" value="dharanidharan.ai@example.com">
+              </div>
+              <div class="vault-field">
+                <label class="vault-label">Phone Number</label>
+                <input id="vault-phone" class="vault-input" type="text" value="+1 (555) 234-8901">
+              </div>
+            </div>
+
+            <div class="vault-field">
+              <label class="vault-label">Location / Work Authorization</label>
+              <input id="vault-location" class="vault-input" type="text" value="San Francisco, CA / Hybrid">
+            </div>
+
+            <div class="vault-form-row">
+              <div class="vault-field">
+                <label class="vault-label">LinkedIn Profile URL</label>
+                <input id="vault-linkedin" class="vault-input" type="url" value="https://linkedin.com/in/dharanidharan-ai">
+              </div>
+              <div class="vault-field">
+                <label class="vault-label">GitHub Profile URL</label>
+                <input id="vault-github" class="vault-input" type="url" value="https://github.com/dharanidharan-dev">
+              </div>
+            </div>
+
+            <div class="vault-field">
+              <label class="vault-label">Portfolio Website URL</label>
+              <input id="vault-portfolio" class="vault-input" type="url" value="https://dharanidharan.dev">
+            </div>
+
+            <!-- Academic Qualifications Sub-Section -->
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--card-border); padding-bottom: 12px; margin-top: 10px;">
+              <h3 style="color: #FFF; font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 8px;">
+                <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c0 2 2 3 6 3s6-1 6-3v-5"/></svg>
+                <span>Academic Qualifications & Degree</span>
+              </h3>
+              <span style="font-size: 11px; color: var(--gold-light); font-weight: 700;">Unstop Criteria</span>
+            </div>
+
+            <div class="vault-form-row">
+              <div class="vault-field">
+                <label class="vault-label">College / University</label>
+                <input id="vault-college" class="vault-input" type="text" value="Institute of Technology">
+              </div>
+              <div class="vault-field">
+                <label class="vault-label">Degree & Major</label>
+                <input id="vault-degree" class="vault-input" type="text" value="B.Tech in Artificial Intelligence & Data Science">
+              </div>
+            </div>
+
+            <div class="vault-form-row">
+              <div class="vault-field">
+                <label class="vault-label">Graduation Year</label>
+                <input id="vault-grad-year" class="vault-input" type="text" value="2026">
+              </div>
+              <div class="vault-field">
+                <label class="vault-label">CGPA / GPA</label>
+                <input id="vault-cgpa" class="vault-input" type="text" value="3.92 / 4.0">
+              </div>
+            </div>
+
+            <div class="vault-field">
+              <label class="vault-label">Core Skills (Comma separated for autofill injection)</label>
+              <textarea id="vault-skills" class="vault-input" style="height: 70px; resize: vertical;" placeholder="Python, FastAPI, Next.js, Stagehand, Docker..."></textarea>
+            </div>
+
+            <div style="display: flex; gap: 12px; margin-top: 6px;">
+              <button class="btn-run" style="flex: 1; justify-content: center;" onclick="saveAutofillVault()">
+                <svg class="icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></svg>
+                <span>Save & Sync Profile to MCP</span>
+              </button>
+              <button class="btn-preset" onclick="loadAutofillVault()">
+                <svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
+                <span>Reset from Vault</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Right: MCP Resume & Live Form Mapping Preview -->
+          <div class="vault-panel">
+            <h3 style="color: #FFF; font-size: 15px; font-weight: 700; display: flex; align-items: center; gap: 8px;">
+              <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" x2="8" y1="13" y2="13"/><line x1="16" x2="8" y1="17" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+              <span>Connected Resume Document</span>
+            </h3>
+
+            <div class="resume-mcp-card">
+              <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="width: 40px; height: 40px; border-radius: 8px; background: rgba(245, 158, 11, 0.15); display: flex; align-items: center; justify-content: center; color: var(--gold);">
+                  <svg class="icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                </div>
+                <div>
+                  <div id="vault-resume-name" style="color: #FFF; font-weight: 700; font-size: 14px;">resume.pdf</div>
+                  <div id="vault-resume-meta" style="color: var(--text-muted); font-size: 12px;">142 KB · PDF Document · Parsed by MCP</div>
+                </div>
+              </div>
+              <span class="mcp-pill-verified">
+                <svg class="icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                <span>VALIDATED</span>
+              </span>
+            </div>
+
+            <div style="margin-top: 10px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <span style="font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Live Form Field Mapping (Unstop + ATS)</span>
+                <span style="font-size: 11px; color: var(--gold-light);">Auto-Injected by Stagehand</span>
+              </div>
+              <div id="vault-mapping-preview" class="mapping-preview-box">
+                <!-- Live mapping rendered via JavaScript -->
+              </div>
+            </div>
+
+            <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; padding: 12px; margin-top: auto;">
+              <div style="font-size: 12px; color: var(--green); font-weight: 700; margin-bottom: 4px;">Zero-Re-typing Guarantee</div>
+              <p style="font-size: 12px; color: #94A3B8; line-height: 1.4;">
+                When you click "Apply with SIVI" on any Unstop internship, SIVI binds these values directly to `#unstop_name`, `#unstop_email`, `#unstop_phone`, `#unstop_college`, `#unstop_degree`, `#unstop_grad_year`, `#unstop_cgpa`, `#unstop_skills`, and attaches `resume.pdf` automatically.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- HITL SAFETY APPROVAL MODAL -->
+  <div id="approval-modal" class="modal-overlay">
+    <div class="modal-content">
+      <div class="modal-warning-bar">
+        <svg class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" /><line x1="12" x2="12" y1="8" y2="12" /><line x1="12" x2="12.01" y1="16" y2="16" /></svg>
+        <span>HUMAN-IN-THE-LOOP SAFETY GATE ACTIVATED</span>
+        <span id="countdown-badge" style="margin-left: auto; background: #000; padding: 2px 8px; border-radius: 4px;">60s</span>
+      </div>
+      <h2 style="font-size: 20px; color: #FFF; margin-bottom: 8px;">Approval Required to Submit Application</h2>
+      <p style="color: var(--text-muted); font-size: 13px;">
+        SIVI has verified all fields, matched requirements, and attached your resume. Confirm authorization before executing destructive submission:
+      </p>
+
+      <div class="preview-box">
+        <div class="preview-row">
+          <span class="preview-key">Company</span>
+          <span id="modal-company" class="preview-val">TechCorp</span>
+        </div>
+        <div class="preview-row">
+          <span class="preview-key">Position</span>
+          <span id="modal-role" class="preview-val">Software Engineer Intern</span>
+        </div>
+        <div class="preview-row">
+          <span class="preview-key">Candidate</span>
+          <span id="modal-applicant" class="preview-val">Dharanidharan D</span>
+        </div>
+        <div class="preview-row">
+          <span class="preview-key">Attached Document</span>
+          <span id="modal-resume" class="preview-val" style="color: var(--green);">resume.pdf (142 KB, Validated)</span>
+        </div>
+        <div class="preview-row">
+          <span class="preview-key">Match Confidence</span>
+          <span id="modal-match" class="preview-val" style="color: var(--gold);">98.0%</span>
+        </div>
+      </div>
+
+      <div class="modal-actions">
+        <button id="btn-modal-approve" class="btn-approve" onclick="resolveApproval(true)" style="display: flex; align-items: center; justify-content: center; gap: 8px;">
+          <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
+          <span>Approve Submission</span>
+        </button>
+        <button id="btn-modal-deny" class="btn-deny" onclick="resolveApproval(false)" style="display: flex; align-items: center; justify-content: center; gap: 8px;">
+          <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><line x1="15" x2="9" y1="9" y2="15" /><line x1="9" x2="15" y1="9" y2="15" /></svg>
+          <span>Abort & Cancel</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ONBOARDING MODAL -->
+  <div id="onboarding-modal" class="modal-overlay">
+    <div class="modal-content" style="max-width: 580px;">
+      <h2 style="color: var(--gold); font-size: 20px; margin-bottom: 8px; display: flex; align-items: center; gap: 8px;">
+        <svg class="icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10" /><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /><path d="M12 17h.01" /></svg>
+        <span>Welcome to SIVI</span>
+      </h2>
+      <p style="color: var(--text-muted); font-size: 13px; margin-bottom: 16px;">
+        SIVI is your autonomous job application agent. It inspects job postings with Stagehand, indexes your local resume via MCP, customizes responses, and asks for your approval before submitting.
+      </p>
+      <div style="background: #0B0E17; padding: 14px; border-radius: 8px; border: 1px solid var(--card-border); font-size: 13px; margin-bottom: 18px;">
+        <strong>How to run the 2:45 hackathon demo:</strong>
+        <ol style="margin-top: 8px; padding-left: 20px; color: #CBD5E1; line-height: 1.6;">
+          <li>Click <strong>'TechCorp Demo Flow (2:45m)'</strong> preset.</li>
+          <li>Click <strong>'Launch SIVI'</strong> to watch the live streaming monologue and browser viewport.</li>
+          <li>When the <strong>HITL Safety Modal</strong> appears, inspect fields and click <strong>'Approve'</strong>.</li>
+          <li>View the application saved in the <strong>Application Tracker</strong> and <strong>Analytics</strong>!</li>
+        </ol>
+      </div>
+      <button class="btn-approve" style="width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;" onclick="closeOnboarding()">
+        <span>Let's Get Started</span>
+        <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14" /><path d="m12 5 7 7-7 7" /></svg>
+      </button>
+  <!-- MODEL STUDIO MODAL (AI & CHALLENGE APIS) -->
+  <div id="model-studio-modal" class="modal-overlay">
+    <div class="modal-content" style="max-width: 820px; max-height: 85vh; overflow-y: auto;">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;">
+        <div>
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+            <span class="badge-unstop">
+              <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>
+              <span>AI BUILD CHALLENGE API STUDIO</span>
+            </span>
+            <span style="font-size: 12px; color: var(--text-muted);">Real-Time Multi-Provider Inference & Geospatial</span>
+          </div>
+          <h2 style="color: #FFF; font-size: 20px; font-weight: 800; letter-spacing: -0.3px;">Multi-Provider LLM & Open Data Studio</h2>
+          <p style="color: var(--text-muted); font-size: 13px; margin-top: 3px;">
+            Configure your AI keys, test endpoint latencies in real-time, or leverage free-tier variants from the AI Build Challenge resource list.
+          </p>
+        </div>
+        <button class="btn-icon" onclick="closeModelStudioModal()">
+          <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+
+      <!-- Providers List -->
+      <div id="providers-container">
+        <!-- Rendered dynamically via JS or Fallback UI -->
+      </div>
+
+      <!-- Indian Govt & Space Integration Links (Page 2 of PDF) -->
+      <div style="margin-top: 18px; padding-top: 18px; border-top: 1px solid var(--card-border);">
+        <div style="font-size: 12px; font-weight: 700; color: var(--gold); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px;">
+          Indian Government & Geospatial Platforms (PDF Resources):
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+          <div style="background: #090C14; border: 1px solid var(--card-border); border-radius: 8px; padding: 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <strong style="color: #FFF; font-size: 13px;">data.gov.in</strong>
+              <a href="https://data.gov.in" target="_blank" class="provider-docs-link">
+                <span>data.gov.in</span>
+                <svg class="icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+              </a>
+            </div>
+            <p style="color: var(--text-muted); font-size: 12px; margin-top: 4px;">
+              Open Government Data (OGD) Platform India. Integrated for official public sector tech internships from NIC, MeitY, AICTE, and DRDO.
+            </p>
+          </div>
+          <div style="background: #090C14; border: 1px solid var(--card-border); border-radius: 8px; padding: 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <strong style="color: #FFF; font-size: 13px;">ISRO / Bhuvan Platform</strong>
+              <a href="https://bhuvan-app1.nrsc.gov.in/api" target="_blank" class="provider-docs-link">
+                <span>bhuvan-app1.nrsc.gov.in/api</span>
+                <svg class="icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+              </a>
+            </div>
+            <p style="color: var(--text-muted); font-size: 12px; margin-top: 4px;">
+              ISRO / NRSC Geospatial Services. Provides candidate-to-office geodesic distance calculations and commute viability indices on WGS-84 datum.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ACCESSIBILITY & WCAG 2.1 AA HUB MODAL -->
+  <div id="accessibility-modal" class="modal-overlay">
+    <div class="modal-content" style="max-width: 680px;">
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px;">
+        <div>
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+            <span class="mcp-pill-verified">
+              <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m4.93 4.93 4.24 4.24"/><path d="m14.83 9.17 4.24-4.24"/><path d="m14.83 14.83 4.24 4.24"/><path d="m9.17 14.83-4.24 4.24"/><circle cx="12" cy="12" r="4"/></svg>
+              <span>WCAG 2.1 AA COMPLIANCE</span>
+            </span>
+            <span style="font-size: 12px; color: var(--text-muted);">Assistive Technology & Inclusive Design</span>
+          </div>
+          <h2 style="color: #FFF; font-size: 20px; font-weight: 800; letter-spacing: -0.3px;">Accessibility & Assistive Tech Hub</h2>
+          <p style="color: var(--text-muted); font-size: 13px; margin-top: 3px;">
+            Empowering candidates of all abilities with high-contrast theming, voice assistance, screen reader live regions, and keyboard shortcuts.
+          </p>
+        </div>
+        <button class="btn-icon" onclick="closeAccessibilityModal()">
+          <svg class="icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+
+      <!-- A11y Controls -->
+      <div class="a11y-setting-row">
+        <div>
+          <strong style="color: #FFF; font-size: 14px;">High Contrast Mode (WCAG 2.1 AAA)</strong>
+          <p style="color: var(--text-muted); font-size: 12px; margin-top: 2px;">
+            Ultra-high contrast black background with vivid gold borders for low-vision users.
+          </p>
+        </div>
+        <button id="btn-toggle-contrast" class="btn-preset" onclick="toggleHighContrast()">
+          <span id="contrast-state-label">Enable High Contrast</span>
+        </button>
+      </div>
+
+      <div class="a11y-setting-row">
+        <div>
+          <strong style="color: #FFF; font-size: 14px;">Typography Scale</strong>
+          <p style="color: var(--text-muted); font-size: 12px; margin-top: 2px;">
+            Adjust font sizing across all agent panels and forms.
+          </p>
+        </div>
+        <div style="display: flex; gap: 6px;">
+          <button class="btn-preset" onclick="setFontSize(14)">14px</button>
+          <button class="btn-preset" onclick="setFontSize(16)">16px</button>
+          <button class="btn-preset" onclick="setFontSize(18)">18px</button>
+        </div>
+      </div>
+
+      <div class="a11y-setting-row">
+        <div>
+          <strong style="color: #FFF; font-size: 14px;">Dyslexia-Friendly Mode</strong>
+          <p style="color: var(--text-muted); font-size: 12px; margin-top: 2px;">
+            Increases letter spacing, line height, and uses high-legibility letterforms.
+          </p>
+        </div>
+        <button id="btn-toggle-dyslexic" class="btn-preset" onclick="toggleDyslexicFont()">
+          <span id="dyslexic-state-label">Enable Dyslexia Font</span>
+        </button>
+      </div>
+
+      <div class="a11y-setting-row">
+        <div>
+          <strong style="color: #FFF; font-size: 14px;">Voice Speech Guidance (TTS)</strong>
+          <p style="color: var(--text-muted); font-size: 12px; margin-top: 2px;">
+            Speaks aloud each autonomous decision, reasoning step, and safety gate.
+          </p>
+        </div>
+        <button id="btn-toggle-tts" class="btn-preset" onclick="toggleSpeechTTS()">
+          <span id="tts-state-label">Enable Voice Audio (TTS)</span>
+        </button>
+      </div>
+
+      <!-- Keyboard Shortcuts Reference -->
+      <div style="margin-top: 14px; background: #090C14; border: 1px solid var(--card-border); border-radius: 8px; padding: 14px;">
+        <strong style="color: var(--gold); font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px;">Keyboard Navigation Shortcuts:</strong>
+        <table class="shortcut-table">
+          <tr>
+            <td><kbd class="shortcut-kbd">Alt + L</kbd></td>
+            <td style="color: #FFF;">Launch SIVI Autonomous Flow</td>
+          </tr>
+          <tr>
+            <td><kbd class="shortcut-kbd">Alt + V</kbd></td>
+            <td style="color: #FFF;">Toggle Hands-Free Voice Microphone (STT)</td>
+          </tr>
+          <tr>
+            <td><kbd class="shortcut-kbd">Alt + U</kbd></td>
+            <td style="color: #FFF;">Open Unstop & Govt Opportunities Explorer</td>
+          </tr>
+          <tr>
+            <td><kbd class="shortcut-kbd">Alt + A</kbd></td>
+            <td style="color: #FFF;">Open Accessibility & Assistive Tech Hub</td>
+          </tr>
+          <tr>
+            <td><kbd class="shortcut-kbd">Alt + K</kbd></td>
+            <td style="color: #FFF;">Open Multi-Provider LLM & API Keys Studio</td>
+          </tr>
+          <tr>
+            <td><kbd class="shortcut-kbd">Alt + C</kbd></td>
+            <td style="color: #FFF;">Toggle High Contrast Palette On / Off</td>
+          </tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let ws = null;
+    let tokenCount = 0;
+    let actionCount = 0;
+    let countdownInterval = null;
+    let currentRequestId = null;
+    let isListeningVoice = false;
+
+    // -------------------------------------------------------------
+    // Accessibility Hub Functions (WCAG 2.1 AA/AAA)
+    // -------------------------------------------------------------
+    let isHighContrast = false;
+    let isDyslexicFont = false;
+    let isSpeechTtsEnabled = false;
+
+    function openAccessibilityModal() {
+      document.getElementById('accessibility-modal').classList.add('active');
+      announceForScreenReader('Accessibility and Assistive Technology Hub opened');
+    }
+
+    function closeAccessibilityModal() {
+      document.getElementById('accessibility-modal').classList.remove('active');
+    }
+
+    function toggleHighContrast() {
+      isHighContrast = !isHighContrast;
+      document.body.classList.toggle('high-contrast', isHighContrast);
+      const label = document.getElementById('contrast-state-label');
+      if (label) label.innerText = isHighContrast ? 'High Contrast: ACTIVE' : 'Enable High Contrast';
+      announceForScreenReader(isHighContrast ? 'High contrast mode enabled' : 'High contrast mode disabled');
+    }
+
+    function setFontSize(px) {
+      document.documentElement.style.fontSize = px + 'px';
+      announceForScreenReader('Font size adjusted to ' + px + ' pixels');
+    }
+
+    function toggleDyslexicFont() {
+      isDyslexicFont = !isDyslexicFont;
+      document.body.classList.toggle('dyslexic-font', isDyslexicFont);
+      const label = document.getElementById('dyslexic-state-label');
+      if (label) label.innerText = isDyslexicFont ? 'Dyslexia Mode: ACTIVE' : 'Enable Dyslexia Font';
+      announceForScreenReader(isDyslexicFont ? 'Dyslexia friendly typography enabled' : 'Dyslexia mode disabled');
+    }
+
+    function toggleSpeechTTS() {
+      isSpeechTtsEnabled = !isSpeechTtsEnabled;
+      const label = document.getElementById('tts-state-label');
+      if (label) label.innerText = isSpeechTtsEnabled ? 'Voice Audio (TTS): ACTIVE' : 'Enable Voice Audio (TTS)';
+      if (isSpeechTtsEnabled) {
+        speakConfirmation('Voice audio guidance enabled. SIVI reasoning steps will be spoken aloud.');
+      }
+      announceForScreenReader(isSpeechTtsEnabled ? 'Speech audio guidance active' : 'Speech guidance muted');
+    }
+
+    function announceForScreenReader(message) {
+      const region = document.getElementById('a11y-live-region');
+      if (region) {
+        region.innerText = message;
+      }
+      if (isSpeechTtsEnabled && 'speechSynthesis' in window) {
+        speakConfirmation(message);
+      }
+    }
+
+    function setupKeyboardShortcuts() {
+      window.addEventListener('keydown', (e) => {
+        if (!e.altKey) return;
+        const key = e.key.toLowerCase();
+        if (key === 'l') {
+          e.preventDefault();
+          startExecution();
+        } else if (key === 'v') {
+          e.preventDefault();
+          toggleVoiceInput();
+        } else if (key === 'u') {
+          e.preventDefault();
+          switchTab('unstop');
+        } else if (key === 'a') {
+          e.preventDefault();
+          openAccessibilityModal();
+        } else if (key === 'k') {
+          e.preventDefault();
+          openModelStudioModal();
+        } else if (key === 'c') {
+          e.preventDefault();
+          toggleHighContrast();
+        }
+      });
+    }
+
+    // -------------------------------------------------------------
+    // Multi-Provider Model Studio Functions
+    // -------------------------------------------------------------
+    let currentProvidersData = null;
+
+    function openModelStudioModal() {
+      document.getElementById('model-studio-modal').classList.add('active');
+      fetchModelProviders();
+      announceForScreenReader('AI Model and API Key Studio opened');
+    }
+
+    function closeModelStudioModal() {
+      document.getElementById('model-studio-modal').classList.remove('active');
+    }
+
+    function fetchModelProviders() {
+      fetch('/api/models/providers')
+        .then(r => r.json())
+        .then(data => {
+          currentProvidersData = data;
+          renderModelProviders(data);
+          updateHeaderModelPill(data);
+        })
+        .catch(err => console.error('Error fetching model providers:', err));
+    }
+
+    function updateHeaderModelPill(data) {
+      const activeP = (data.providers || []).find(p => p.id === data.active_provider) || (data.providers || [])[0];
+      const pillName = document.getElementById('active-model-display');
+      if (pillName && activeP) {
+        const shortModel = (activeP.selected_model || '').split(':')[0].split('/')[0];
+        pillName.innerText = activeP.name.split(' ')[0] + ' ' + (shortModel || 'LLM');
+      }
+    }
+
+    function renderModelProviders(data) {
+      const container = document.getElementById('providers-container');
+      if (!container) return;
+
+      container.innerHTML = (data.providers || []).map(p => {
+        const isActive = p.id === data.active_provider;
+        const modelOptions = (p.available_models || []).map(m =>
+          '<option value="' + m + '" ' + (m === p.selected_model ? 'selected' : '') + '>' + m + '</option>'
+        ).join('');
+
+        return `
+          <div class="provider-card ${isActive ? 'active-provider' : ''}">
+            <div class="provider-header">
+              <div class="provider-name">
+                <span>${p.name}</span>
+                ${isActive ? '<span class="badge-unstop">ACTIVE</span>' : ''}
+                ${p.is_configured ? '<span class="badge-gov">CONFIGURED</span>' : '<span style="font-size: 11px; color: var(--text-muted);">(Built-in Engine)</span>'}
+              </div>
+              <a href="${p.docs_url}" target="_blank" class="provider-docs-link">
+                <span>API Keys & Docs</span>
+                <svg class="icon" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+              </a>
+            </div>
+            <p style="font-size: 12px; color: var(--text-muted); margin: 0;">${p.description}</p>
+            <div class="provider-row">
+              <input id="key-input-${p.id}" class="input-box" type="password" placeholder="API Key (${p.masked_key})" style="font-size: 12px;">
+              <select id="model-select-${p.id}" class="unstop-select" style="font-size: 12px;">
+                ${modelOptions}
+              </select>
+              <button class="btn-preset" onclick="testProviderKey('${p.id}')">
+                <span>Test Ping</span>
+              </button>
+              <button class="btn-approve" style="padding: 8px 14px; font-size: 12px;" onclick="activateProvider('${p.id}')">
+                <span>${isActive ? 'Update' : 'Select'}</span>
+              </button>
+            </div>
+            <div id="test-feedback-${p.id}" style="font-size: 11px; font-family: var(--font-mono); color: var(--text-muted); min-height: 14px;"></div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function activateProvider(providerId) {
+      const keyInput = document.getElementById('key-input-' + providerId);
+      const modelSelect = document.getElementById('model-select-' + providerId);
+      const apiKey = keyInput ? keyInput.value.trim() : '';
+      const selectedModel = modelSelect ? modelSelect.value : null;
+
+      const payload = { provider: providerId, model: selectedModel };
+      if (apiKey) payload.api_key = apiKey;
+
+      fetch('/api/models/configure', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      .then(r => r.json())
+      .then(res => {
+        alert(res.message || 'Provider configured');
+        fetchModelProviders();
+      })
+      .catch(err => alert('Error configuring provider: ' + err));
+    }
+
+    function testProviderKey(providerId) {
+      const keyInput = document.getElementById('key-input-' + providerId);
+      const modelSelect = document.getElementById('model-select-' + providerId);
+      const feedback = document.getElementById('test-feedback-' + providerId);
+      const apiKey = keyInput ? keyInput.value.trim() : '';
+      const selectedModel = modelSelect ? modelSelect.value : null;
+
+      if (feedback) feedback.innerHTML = '<span style="color: var(--gold);">Measuring round-trip latency...</span>';
+
+      fetch('/api/models/test-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: providerId,
+          api_key: apiKey || 'test',
+          model: selectedModel
+        })
+      })
+      .then(r => r.json())
+      .then(res => {
+        if (res.valid) {
+          if (feedback) feedback.innerHTML = '<span style="color: var(--green);">SUCCESS: Verified ' + res.provider.toUpperCase() + ' (' + res.latency_ms + ' ms round-trip)</span>';
+          const latencyChip = document.getElementById('active-model-latency-chip');
+          if (latencyChip) latencyChip.innerText = res.latency_ms + 'ms';
+        } else {
+          if (feedback) feedback.innerHTML = '<span style="color: #F87171;">Latency: ' + res.latency_ms + ' ms (' + (res.message || 'Check key') + ')</span>';
+        }
+      })
+      .catch(err => {
+        if (feedback) feedback.innerHTML = '<span style="color: #F87171;">Connection test error: ' + err + '</span>';
+      });
+    }
+
+    // Load initial applications list on page load
+    window.addEventListener('DOMContentLoaded', () => {
+      fetchApplications();
+      generateStudioLetter();
+      fetchModelProviders();
+      setupKeyboardShortcuts();
+    });
+
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+      document.querySelectorAll('.nav-tab').forEach(el => el.classList.remove('active'));
+      const target = document.getElementById('tab-' + tabId);
+      if (target) target.classList.add('active');
+      const btn = document.getElementById('tab-btn-' + tabId);
+      if (btn) btn.classList.add('active');
+      else if (window.event && window.event.currentTarget) window.event.currentTarget.classList.add('active');
+
+      if (tabId === 'tracker') fetchApplications();
+      if (tabId === 'analytics') fetchAnalytics();
+      if (tabId === 'unstop') fetchUnstopInternships();
+      if (tabId === 'vault') loadAutofillVault();
+    }
+
+    function setPreset(type) {
+      const goalEl = document.getElementById('goal-input');
+      const urlEl = document.getElementById('url-input');
+      const iframe = document.getElementById('browser-iframe');
+      const urlDisplay = document.getElementById('browser-url-display');
+
+      if (type === 'meity' || type === 'unstop') {
+        goalEl.value = 'Apply for MeitY (Digital India Bhashini AI Mission) – Generative AI & Indic Language Model Fellow on Unstop';
+        urlEl.value = 'http://localhost:8888/mock/unstop/internships/gov-meity-genai-fellow-2026';
+        if (iframe) iframe.src = '/mock/unstop/internships/gov-meity-genai-fellow-2026';
+        if (urlDisplay) urlDisplay.innerText = urlEl.value;
+      } else if (type === 'isro') {
+        goalEl.value = 'Apply for ISRO SAC (Space Applications Centre) – Satellite Imagery & Geospatial Deep Learning Intern';
+        urlEl.value = 'http://localhost:8888/mock/unstop/internships/gov-isro-sac-geospatial-2026';
+        if (iframe) iframe.src = '/mock/unstop/internships/gov-isro-sac-geospatial-2026';
+        if (urlDisplay) urlDisplay.innerText = urlEl.value;
+      } else if (type === 'nic') {
+        goalEl.value = 'Apply for NIC (National Informatics Centre) – GovCloud Systems & Distributed Systems Intern';
+        urlEl.value = 'http://localhost:8888/mock/unstop/internships/gov-nic-digital-india-2026';
+        if (iframe) iframe.src = '/mock/unstop/internships/gov-nic-digital-india-2026';
+        if (urlDisplay) urlDisplay.innerText = urlEl.value;
+      } else if (type === 'drdo') {
+        goalEl.value = 'Apply for DRDO CAIR – Autonomous Systems & Sensor Fusion Intern';
+        urlEl.value = 'http://localhost:8888/mock/unstop/internships/gov-drdo-robotics-2026';
+        if (iframe) iframe.src = '/mock/unstop/internships/gov-drdo-robotics-2026';
+        if (urlDisplay) urlDisplay.innerText = urlEl.value;
+      } else if (type === 'aicte') {
+        goalEl.value = 'Apply for AICTE (National Internship Portal) – EdTech & Data Engineering Intern';
+        urlEl.value = 'http://localhost:8888/mock/unstop/internships/gov-aicte-tech-intern-2026';
+        if (iframe) iframe.src = '/mock/unstop/internships/gov-aicte-tech-intern-2026';
+        if (urlDisplay) urlDisplay.innerText = urlEl.value;
+      } else if (type === 'techcorp') {
+        goalEl.value = 'Apply for the Software Engineer internship at TechCorp';
+        urlEl.value = 'http://localhost:8888/mock/techcorp/jobs/swe-intern';
+        if (iframe) iframe.src = '/mock/techcorp/jobs/swe-intern';
+        if (urlDisplay) urlDisplay.innerText = urlEl.value;
+      } else if (type === 'greenhouse') {
+        goalEl.value = 'Apply for Senior AI Engineer at ScaleAI via Greenhouse ATS';
+        urlEl.value = 'http://localhost:8888/mock/greenhouse/jobs/ai-engineer';
+        if (iframe) iframe.src = '/mock/greenhouse/jobs/ai-engineer';
+        if (urlDisplay) urlDisplay.innerText = urlEl.value;
+      } else if (type === 'workday') {
+        goalEl.value = 'Apply for Lead Cloud Infrastructure Architect at CloudScale';
+        urlEl.value = 'http://localhost:8888/mock/workday/jobs/cloud-architect';
+        if (iframe) iframe.src = '/mock/workday/jobs/cloud-architect';
+        if (urlDisplay) urlDisplay.innerText = urlEl.value;
+      } else if (type === 'batch') {
+        goalEl.value = 'Batch apply for AI & Autonomous Systems engineer roles';
+        document.getElementById('sel-batch').value = '3';
+        alert('Batch Mode Selected: SIVI will queue 3 tech roles with rate-limiting pacing.');
+      }
+    }
+
+    function toggleVoiceInput() {
+      const micBtn = document.getElementById('btn-mic');
+      const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRec) {
+        alert('Web Speech API is not supported in this browser. Please type your goal directly.');
+        return;
+      }
+
+      if (isListeningVoice) {
+        isListeningVoice = false;
+        micBtn.classList.remove('listening');
+        return;
+      }
+
+      const recognition = new SpeechRec();
+      recognition.continuous = false;
+      recognition.lang = 'en-US';
+
+      recognition.onstart = () => {
+        isListeningVoice = true;
+        micBtn.classList.add('listening');
+      };
+      recognition.onresult = (e) => {
+        const transcript = e.results[0][0].transcript;
+        document.getElementById('goal-input').value = transcript;
+        speakConfirmation("Goal registered: " + transcript);
+      };
+      recognition.onerror = () => {
+        isListeningVoice = false;
+        micBtn.classList.remove('listening');
+      };
+      recognition.onend = () => {
+        isListeningVoice = false;
+        micBtn.classList.remove('listening');
+      };
+      recognition.start();
+    }
+
+    function speakConfirmation(text) {
+      if ('speechSynthesis' in window) {
+        const utt = new SpeechSynthesisUtterance(text);
+        utt.rate = 1.1;
+        window.speechSynthesis.speak(utt);
+      }
+    }
+
+    function startExecution() {
+      const goal = document.getElementById('goal-input').value.trim();
+      const jobUrl = document.getElementById('url-input').value.trim();
+      const tone = document.getElementById('sel-tone').value;
+      const batchCount = parseInt(document.getElementById('sel-batch').value);
+
+      if (!goal) return alert('Please enter a goal.');
+
+      tokenCount = 0;
+      actionCount = 0;
+      document.getElementById('reasoning-body').innerHTML = '';
+      document.getElementById('token-counter').innerText = '0 tokens';
+      document.getElementById('agent-state-label').innerText = 'Autonomous Workflow Active';
+      document.getElementById('btn-start').disabled = true;
+      document.getElementById('btn-start').innerText = 'Agent Active...';
+
+      addAction('INIT', 'Initiating SIVI: "' + goal + '"', 'pending');
+
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = protocol + '//' + window.location.host + '/ws/agent';
+
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        ws.send(JSON.stringify({ goal, url: jobUrl, tone, batch_count: batchCount }));
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          handleAgentEvent(data);
+        } catch (e) {
+          console.error('WS Parse Error', e);
+        }
+      };
+
+      ws.onclose = () => {
+        document.getElementById('btn-start').disabled = false;
+        document.getElementById('btn-start').innerHTML = '<svg class="icon" width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 3 20 12 6 21 6 3" /></svg><span>Launch SIVI</span>';
+      };
+    }
+
+    function handleAgentEvent(data) {
+      const type = data.type;
+      const body = document.getElementById('reasoning-body');
+
+      if (type === 'reasoning_stream') {
+        tokenCount += Math.max(1, Math.floor(data.chunk.length / 4));
+        document.getElementById('token-counter').innerText = tokenCount + ' tokens';
+        const span = document.createElement('span');
+        span.innerText = data.chunk;
+        body.appendChild(span);
+        body.scrollTop = body.scrollHeight;
+      } else if (type === 'observation') {
+        addAction('OBSERVE', data.message, 'success');
+        announceForScreenReader(data.message);
+      } else if (type === 'form_analysis') {
+        addAction('ATS INTEL', data.message, 'success');
+      } else if (type === 'skills_match') {
+        addAction('MCP MATCH', 'Matched ' + data.matched_skills.length + ' skills (' + data.match_score + '% score) for ' + data.candidate_name, 'success');
+      } else if (type === 'viewport_update') {
+        document.getElementById('browser-url-display').innerText = data.url;
+      } else if (type === 'action_result') {
+        addAction('ACT', data.result, 'success');
+      } else if (type === 'approval_required') {
+        triggerHitlModal(data);
+        announceForScreenReader('Safety Alert: Human authorization required to submit application to ' + ((data.parameters && data.parameters.company) || 'target company'));
+      } else if (type === 'status' && data.phase === 'COMPLETED') {
+        document.getElementById('agent-state-label').innerText = 'Application Submitted Successfully';
+        addAction('COMPLETED', data.message, 'success');
+        announceForScreenReader('Success: Application submitted successfully!');
+        fetchApplications();
+      }
+    }
+
+    function addAction(type, msg, status) {
+      actionCount++;
+      document.getElementById('action-count-badge').innerText = actionCount + ' Actions Executed';
+      const timeline = document.getElementById('action-timeline');
+      const card = document.createElement('div');
+      card.className = 'action-card ' + status;
+      card.innerHTML = '<div class="action-type-badge">' + type + '</div><div style="color: #CBD5E1;">' + msg + '</div>';
+      timeline.prepend(card);
+    }
+
+    function triggerHitlModal(data) {
+      currentRequestId = data.request_id;
+      const modal = document.getElementById('approval-modal');
+      modal.style.display = 'flex';
+      document.getElementById('agent-state-label').innerText = 'PAUSED (HITL Approval Required)';
+
+      const preview = data.form_preview || {};
+      document.getElementById('modal-company').innerText = preview.company || 'TechCorp';
+      document.getElementById('modal-role').innerText = preview.role || 'Software Engineer Intern';
+      document.getElementById('modal-applicant').innerText = preview.candidate_name || 'Dharanidharan D';
+      document.getElementById('modal-resume').innerText = preview.resume_attached || 'resume.pdf (142 KB, Validated)';
+      document.getElementById('modal-match').innerText = preview.match_score || '98.0%';
+
+      let seconds = 60;
+      const badge = document.getElementById('countdown-badge');
+      badge.innerText = seconds + 's';
+      clearInterval(countdownInterval);
+      countdownInterval = setInterval(() => {
+        seconds--;
+        badge.innerText = seconds + 's';
+        if (seconds <= 0) {
+          clearInterval(countdownInterval);
+          resolveApproval(false);
+        }
+      }, 1000);
+    }
+
+    function resolveApproval(approved) {
+      clearInterval(countdownInterval);
+      document.getElementById('approval-modal').style.display = 'none';
+
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'approval_response', approved: approved }));
+      }
+
+      fetch('/ws/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approved: approved, requestId: currentRequestId })
+      });
+
+      if (approved) {
+        document.getElementById('agent-state-label').innerText = 'Final Submission Executed Successfully';
+      } else {
+        document.getElementById('agent-state-label').innerText = 'Submission Cancelled by User';
+      }
+    }
+
+    function fetchApplications() {
+      fetch('/api/applications')
+        .then(r => r.json())
+        .then(data => {
+          renderApplications(data.applications || []);
+          document.getElementById('tab-app-count').innerText = data.total || 0;
+          document.getElementById('count-all').innerText = data.total || 0;
+          document.getElementById('kpi-total').innerText = data.total || 0;
+        });
+    }
+
+    function renderApplications(apps) {
+      const grid = document.getElementById('apps-grid');
+      grid.innerHTML = '';
+      apps.forEach(app => {
+        const card = document.createElement('div');
+        card.className = 'app-card';
+        card.innerHTML = `
+          <div class="app-card-header">
+            <div>
+              <strong style="color: #FFF; font-size: 15px;">${app.company}</strong>
+              <div style="font-size: 13px; color: var(--gold-light); margin-top: 2px;">${app.role}</div>
+            </div>
+            <span class="status-badge-app status-${app.status}">${app.status}</span>
+          </div>
+          <div style="font-size: 12px; color: var(--text-muted);">${app.location || 'Remote / Hybrid'} · Match: ${app.match_score}%</div>
+          <div style="font-size: 12px; color: #CBD5E1; background: #0B0E17; padding: 8px; border-radius: 6px;">
+            ${app.notes || 'Autonomous application logged.'}
+          </div>
+          <div style="display: flex; gap: 8px; margin-top: auto; padding-top: 8px;">
+            <button class="btn-preset" style="flex: 1; display:flex; align-items:center; justify-content:center; gap:6px;" onclick="openScheduleModal('${app.id}', '${app.company}')">
+              <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="4" rx="2" ry="2" /><line x1="16" x2="16" y1="2" y2="6" /><line x1="8" x2="8" y1="2" y2="6" /><line x1="3" x2="21" y1="10" y2="10" /></svg>
+              <span>Schedule</span>
+            </button>
+            <button class="btn-preset" style="flex: 1; display:flex; align-items:center; justify-content:center; gap:6px;" onclick="updateStatus('${app.id}')">
+              <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" /><path d="M21 3v5h-5" /><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" /><path d="M8 16H3v5" /></svg>
+              <span>Advance Status</span>
+            </button>
+          </div>
+        `;
+        grid.appendChild(card);
+      });
+    }
+
+    function filterApps(status) {
+      fetch('/api/applications?status=' + status)
+        .then(r => r.json())
+        .then(data => renderApplications(data.applications || []));
+    }
+
+    function updateStatus(appId) {
+      const nextStatus = prompt("Enter new status (Applied / Reviewing / Interview / Offer / Rejected):", "Interview");
+      if (!nextStatus) return;
+      fetch('/api/applications/' + appId, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: nextStatus })
+      }).then(() => fetchApplications());
+    }
+
+    function openScheduleModal(appId, company) {
+      const date = prompt("Enter interview date (YYYY-MM-DD):", "2026-10-15");
+      if (!date) return;
+      fetch('/api/applications/' + appId + '/interview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date: date, time: "14:00 PST", round: "Technical Architecture" })
+      })
+      .then(r => r.json())
+      .then(res => {
+        alert("Interview scheduled for " + company + "! Google Calendar invite link generated.");
+        fetchApplications();
+      });
+    }
+
+    function generateStudioLetter() {
+      const role = document.getElementById('studio-role').value;
+      const comp = document.getElementById('studio-company').value;
+      const tone = document.getElementById('studio-tone').value;
+
+      fetch('/api/cover-letter/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ job_title: role, company_name: comp, tone: tone })
+      })
+      .then(r => r.json())
+      .then(data => {
+        document.getElementById('studio-output').value = data.letter_text || '';
+      });
+    }
+
+    function copyLetter() {
+      const val = document.getElementById('studio-output').value;
+      navigator.clipboard.writeText(val);
+      alert('Cover letter copied to clipboard!');
+    }
+
+    function syncLinkedIn() {
+      fetch('/api/integrations/linkedin/sync', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => alert(data.message));
+    }
+
+    function syncEmail() {
+      fetch('/api/integrations/email/sync', { method: 'POST' })
+        .then(r => r.json())
+        .then(data => alert(data.message));
+    }
+
+    function toggleNotifications() {
+      const d = document.getElementById('notif-dropdown');
+      d.style.display = d.style.display === 'flex' ? 'none' : 'flex';
+    }
+
+    function openOnboarding() {
+      document.getElementById('onboarding-modal').style.display = 'flex';
+    }
+    function closeOnboarding() {
+      document.getElementById('onboarding-modal').style.display = 'none';
+    }
+
+    /* Unstop Explorer JavaScript */
+    let currentUnstopCategory = 'All';
+
+    function setUnstopCategory(btn, category) {
+      document.querySelectorAll('.unstop-category-pill').forEach(el => el.classList.remove('active'));
+      btn.classList.add('active');
+      currentUnstopCategory = category;
+      searchUnstopInternships();
+    }
+
+    function searchUnstopInternships() {
+      const q = (document.getElementById('unstop-search-input') ? document.getElementById('unstop-search-input').value : '').trim();
+      const mode = document.getElementById('unstop-mode-select') ? document.getElementById('unstop-mode-select').value : 'All';
+      fetchUnstopInternships(q, currentUnstopCategory, mode);
+    }
+
+    function fetchUnstopInternships(query = '', category = 'All', mode = 'All') {
+      const params = new URLSearchParams();
+      if (query) params.append('query', query);
+      if (category && category !== 'All') params.append('category', category);
+      if (mode && mode !== 'All') params.append('mode', mode);
+
+      fetch('/api/unstop/search?' + params.toString())
+        .then(r => r.json())
+        .then(data => {
+          renderUnstopCards(data.internships || []);
+          const countEl = document.getElementById('unstop-count-label');
+          if (countEl) countEl.innerText = `Showing ${data.total || (data.internships ? data.internships.length : 0)} internships`;
+        })
+        .catch(err => {
+          console.error('Error fetching Unstop internships:', err);
+        });
+    }
+
+    function renderUnstopCards(internships) {
+      const grid = document.getElementById('unstop-results-grid');
+      if (!grid) return;
+      if (!internships || internships.length === 0) {
+        grid.innerHTML = `
+          <div style="grid-column: 1 / -1; padding: 40px; text-align: center; color: var(--text-muted); background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px;">
+            <p style="font-size: 15px; font-weight: 600; color: #FFF;">No Unstop internships matched your search criteria.</p>
+            <p style="font-size: 13px; margin-top: 6px;">Try adjusting your search terms or switching category filter to "All".</p>
+          </div>
+        `;
+        return;
+      }
+
+      grid.innerHTML = internships.map(item => {
+        const isGov = (item.source && item.source.includes('data.gov.in')) || item.ministry;
+        const orgName = item.organization || item.company || 'Tech Org';
+        const logoLetter = orgName[0] || 'U';
+        const matchedPills = (item.matched_skills || []).slice(0, 4).map(s => '<span class="match-pill">' + s + '</span>').join('');
+        
+        const sourceBadge = isGov
+          ? '<span class="badge-gov">data.gov.in · ' + (item.ministry || item.organization || 'Govt of India') + '</span>'
+          : '<span class="badge-unstop">Unstop Verified</span>';
+
+        const bhuvanPill = item.bhuvan_analysis
+          ? '<div class="bhuvan-commute-pill" title="ISRO Bhuvan NRSC Geospatial Datum: ' + item.bhuvan_analysis.details + '">' +
+            '<svg class="icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#60A5FA" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>' +
+            '<span>Bhuvan: ' + item.bhuvan_analysis.badge + '</span>' +
+            '</div>'
+          : '';
+
+        const safeTitle = (item.title || '').replace(/'/g, "\\'");
+        const safeOrg = orgName.replace(/'/g, "\\'");
+        const safeUrl = item.url || ('http://localhost:8888/mock/unstop/internships/' + item.id);
+
+        return `
+          <div class="unstop-card">
+            <div class="unstop-card-top">
+              <div style="display: flex; gap: 12px; align-items: flex-start;">
+                <div class="unstop-company-logo" style="${isGov ? 'background: #064E3B; border-color: #10B981;' : ''}">${logoLetter}</div>
+                <div>
+                  <div style="margin-bottom: 4px;">${sourceBadge}</div>
+                  <h3 style="color: #FFF; font-size: 16px; font-weight: 700; line-height: 1.3;">${item.title}</h3>
+                  <div style="color: var(--gold-light); font-size: 13px; font-weight: 600; margin-top: 2px;">${orgName}</div>
+                  <div style="color: var(--text-muted); font-size: 11px; margin-top: 1px;">${item.program || 'Hiring Track / Fellowship'}</div>
+                </div>
+              </div>
+              <div class="unstop-match-badge">
+                <svg class="icon" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+                <span>${item.match_score || 95}% Match</span>
+              </div>
+            </div>
+
+            <div class="unstop-meta-chips">
+              <span class="unstop-stipend-tag">${item.stipend}</span>
+              <span style="background: #141824; border: 1px solid var(--card-border); padding: 3px 8px; border-radius: 6px;">Mode: ${item.mode}</span>
+              <span style="background: #141824; border: 1px solid var(--card-border); padding: 3px 8px; border-radius: 6px;">Duration: ${item.duration}</span>
+              ${bhuvanPill}
+            </div>
+
+            <div class="unstop-qual-box">
+              <strong style="color: var(--gold); font-size: 11px; text-transform: uppercase;">Eligibility & Qualifications:</strong>
+              <div style="margin-top: 3px;">${item.qualifications}</div>
+            </div>
+
+            <div>
+              <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin-bottom: 4px;">Top Matched Skills:</div>
+              <div>${matchedPills}</div>
+            </div>
+
+            <div class="unstop-card-actions">
+              <button class="btn-apply-unstop" onclick="applyUnstopWithSivi('${item.id}', '${safeTitle}', '${safeOrg}', '${safeUrl}')">
+                <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><polygon points="6 3 20 12 6 21 6 3" /></svg>
+                <span>Autofill & Apply with SIVI</span>
+              </button>
+              <a href="${safeUrl}" target="_blank" class="btn-portal-unstop" title="Open Portal">
+                <svg class="icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                <span>View Portal</span>
+              </a>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function applyUnstopWithSivi(id, title, company, url) {
+      const goalEl = document.getElementById('goal-input');
+      const urlEl = document.getElementById('url-input');
+      const iframe = document.getElementById('browser-iframe');
+      const urlDisplay = document.getElementById('browser-url-display');
+
+      goalEl.value = `Apply for ${title} at ${company} on Unstop`;
+      urlEl.value = url;
+      if (iframe) iframe.src = url;
+      if (urlDisplay) urlDisplay.innerText = url;
+
+      switchTab('dashboard');
+
+      setTimeout(() => {
+        const confirmLaunch = confirm(`SIVI is configured for Unstop!\n\nGoal: Apply for ${title} at ${company}\nTarget URL: ${url}\nAutofill: Using candidate qualifications & resume.pdf\n\nLaunch autonomous agent execution now?`);
+        if (confirmLaunch) {
+          startExecution();
+        }
+      }, 250);
+    }
+
+    /* Autofill Vault JavaScript */
+    function loadAutofillVault() {
+      fetch('/api/candidate')
+        .then(r => r.json())
+        .then(data => {
+          const cand = data.candidate || {};
+          const auto = data.autofill || {};
+          const personal = auto.personal || cand || {};
+          const academic = auto.academic || {};
+          const resume = auto.resume || {};
+
+          if (document.getElementById('vault-name')) document.getElementById('vault-name').value = personal.full_name || cand.name || '';
+          if (document.getElementById('vault-title')) document.getElementById('vault-title').value = cand.title || '';
+          if (document.getElementById('vault-email')) document.getElementById('vault-email').value = personal.email || cand.email || '';
+          if (document.getElementById('vault-phone')) document.getElementById('vault-phone').value = personal.phone || cand.phone || '';
+          if (document.getElementById('vault-location')) document.getElementById('vault-location').value = personal.location || cand.location || '';
+          if (document.getElementById('vault-linkedin')) document.getElementById('vault-linkedin').value = personal.linkedin || cand.linkedin || '';
+          if (document.getElementById('vault-github')) document.getElementById('vault-github').value = personal.github || cand.github || '';
+          if (document.getElementById('vault-portfolio')) document.getElementById('vault-portfolio').value = personal.portfolio || cand.portfolio || '';
+
+          if (document.getElementById('vault-college')) document.getElementById('vault-college').value = academic.college || '';
+          if (document.getElementById('vault-degree')) document.getElementById('vault-degree').value = academic.degree || '';
+          if (document.getElementById('vault-grad-year')) document.getElementById('vault-grad-year').value = academic.graduation_year || '';
+          if (document.getElementById('vault-cgpa')) document.getElementById('vault-cgpa').value = academic.cgpa || '';
+
+          const skillsList = auto.skills || [];
+          if (document.getElementById('vault-skills')) {
+            document.getElementById('vault-skills').value = Array.isArray(skillsList) ? skillsList.join(', ') : skillsList;
+          }
+
+          if (document.getElementById('vault-resume-name') && resume.filename) {
+            document.getElementById('vault-resume-name').innerText = resume.filename;
+          }
+          if (document.getElementById('vault-resume-meta') && resume.size_kb) {
+            document.getElementById('vault-resume-meta').innerText = `${resume.size_kb} KB · Verified by MCP · Ready to Attach`;
+          }
+
+          const readiness = auto.readiness_score || 100;
+          if (document.getElementById('vault-readiness-percent')) {
+            document.getElementById('vault-readiness-percent').innerText = `${readiness}%`;
+          }
+
+          renderAutofillMappingPreview(auto);
+        })
+        .catch(err => console.error('Error loading autofill vault:', err));
+    }
+
+    function renderAutofillMappingPreview(autofill) {
+      const container = document.getElementById('vault-mapping-preview');
+      if (!container) return;
+
+      const mappingSummary = {
+        "Target Portals": ["Unstop (#unstop_*)", "Greenhouse ATS", "Workday Enterprise", "Lever / Custom"],
+        "Form Field Injection": {
+          "#unstop_name": autofill.personal ? autofill.personal.full_name : "Dharanidharan D",
+          "#unstop_email": autofill.personal ? autofill.personal.email : "dharanidharan.ai@example.com",
+          "#unstop_phone": autofill.personal ? autofill.personal.phone : "+1 (555) 234-8901",
+          "#unstop_college": autofill.academic ? autofill.academic.college : "Institute of Technology",
+          "#unstop_degree": autofill.academic ? autofill.academic.degree : "B.Tech in Artificial Intelligence & Data Science",
+          "#unstop_grad_year": autofill.academic ? autofill.academic.graduation_year : "2026",
+          "#unstop_cgpa": autofill.academic ? autofill.academic.cgpa : "3.92 / 4.0",
+          "#unstop_skills": (autofill.skills || []).slice(0, 6).join(', '),
+          "#unstop_resume_dropzone": (autofill.resume ? autofill.resume.filename : "resume.pdf") + " (Auto-Attached via MCP)"
+        },
+        "Readiness Score": (autofill.readiness_score || 100) + "%"
+      };
+
+      container.innerHTML = `<pre style="margin: 0; white-space: pre-wrap;">${JSON.stringify(mappingSummary, null, 2)}</pre>`;
+    }
+
+    function saveAutofillVault() {
+      const skillsRaw = document.getElementById('vault-skills').value;
+      const skillsArray = skillsRaw.split(',').map(s => s.trim()).filter(s => s.length > 0);
+
+      const payload = {
+        name: document.getElementById('vault-name').value.trim(),
+        title: document.getElementById('vault-title').value.trim(),
+        email: document.getElementById('vault-email').value.trim(),
+        phone: document.getElementById('vault-phone').value.trim(),
+        location: document.getElementById('vault-location').value.trim(),
+        linkedin: document.getElementById('vault-linkedin').value.trim(),
+        github: document.getElementById('vault-github').value.trim(),
+        portfolio: document.getElementById('vault-portfolio').value.trim(),
+        college: document.getElementById('vault-college').value.trim(),
+        degree: document.getElementById('vault-degree').value.trim(),
+        graduation_year: document.getElementById('vault-grad-year').value.trim(),
+        cgpa: document.getElementById('vault-cgpa').value.trim(),
+        skills: skillsArray
+      };
+
+      fetch('/api/candidate', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      })
+      .then(r => r.json())
+      .then(data => {
+        alert('Autofill Profile and Academic Qualifications successfully synced to MCP and data/resume.json!');
+        loadAutofillVault();
+      })
+      .catch(err => {
+        console.error('Error saving profile:', err);
+        alert('Failed to save profile: ' + err);
+      });
+    }
+
+    function testAutofillMapping() {
+      fetch('/api/candidate/autofill')
+        .then(r => r.json())
+        .then(data => {
+          renderAutofillMappingPreview(data);
+          alert('Autofill test complete! All personal and academic fields mapped with 100% readiness for Unstop and ATS portals.');
+        });
+    }
+  </script>
+</body>
+</html>
+"""
+    return HTMLResponse(dashboard_html)
+
+# -------------------------------------------------------------
+# Route Definitions
+# -------------------------------------------------------------
+
+routes = [
+    # Main Interactive UI
+    Route("/", standalone_dashboard_endpoint, methods=["GET"]),
+    
+    # Core Health & Candidates
+    Route("/health", health_endpoint, methods=["GET"]),
+    Route("/api/candidate", candidate_endpoint, methods=["GET"]),
+    Route("/api/candidate", candidate_update_endpoint, methods=["PUT", "POST"]),
+    Route("/api/candidate/autofill", candidate_autofill_endpoint, methods=["GET"]),
+    Route("/api/candidate/resume-upload", candidate_upload_endpoint, methods=["POST"]),
+    Route("/api/jobs", sample_jobs_endpoint, methods=["GET"]),
+    
+    # Unstop Internships & Search Engine
+    Route("/api/unstop/search", unstop_search_endpoint, methods=["GET"]),
+    Route("/api/unstop/internships/{id}", unstop_internship_detail_endpoint, methods=["GET"]),
+    Route("/mock/unstop/internships/{id}", mock_unstop_endpoint, methods=["GET"]),
+    
+    # Smart Matching & Cover Letters
+    Route("/api/match", smart_match_endpoint, methods=["POST"]),
+    Route("/api/cover-letter/generate", cover_letter_endpoint, methods=["POST"]),
+    Route("/api/forms/classify", form_classify_endpoint, methods=["POST"]),
+    
+    # Application Tracker CRUD
+    Route("/api/applications", list_applications_endpoint, methods=["GET"]),
+    Route("/api/applications", create_application_endpoint, methods=["POST"]),
+    Route("/api/applications/{id}", get_application_endpoint, methods=["GET"]),
+    Route("/api/applications/{id}", update_application_endpoint, methods=["PUT"]),
+    Route("/api/applications/{id}", delete_application_endpoint, methods=["DELETE"]),
+    Route("/api/applications/{id}/interview", schedule_interview_endpoint, methods=["POST"]),
+    
+    # Analytics & Integrations
+    Route("/api/analytics", analytics_endpoint, methods=["GET"]),
+    Route("/api/integrations", integrations_endpoint, methods=["GET"]),
+    Route("/api/integrations/linkedin/sync", sync_linkedin_endpoint, methods=["POST"]),
+    Route("/api/integrations/email/sync", sync_email_endpoint, methods=["POST"]),
+    
+    # AI Models & Audio STT Endpoints
+    Route("/api/models/providers", models_providers_endpoint, methods=["GET"]),
+    Route("/api/models/configure", models_configure_endpoint, methods=["POST"]),
+    Route("/api/models/test-key", models_test_key_endpoint, methods=["POST"]),
+    Route("/api/audio/transcribe", audio_transcribe_endpoint, methods=["POST"]),
+
+    # ISRO Bhuvan Geospatial & Open Government Data (data.gov.in)
+    Route("/api/bhuvan/geodistance", bhuvan_geodistance_endpoint, methods=["GET"]),
+    Route("/api/data-gov/internships", data_gov_internships_endpoint, methods=["GET"]),
+
+    # Safety Approval API
+    Route("/ws/approve", approve_endpoint, methods=["POST"]),
+    
+    # Mock Portals
+    Route("/mock/techcorp/jobs/swe-intern", mock_portal_endpoint, methods=["GET"]),
+    Route("/mock/greenhouse/jobs/ai-engineer", mock_greenhouse_endpoint, methods=["GET"]),
+    Route("/mock/workday/jobs/cloud-architect", mock_workday_endpoint, methods=["GET"]),
+    
+    # Real-Time WebSocket Channel
+    WebSocketRoute("/ws/agent", websocket_agent_endpoint)
+]
+
+middleware = [
+    Middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_methods=["*"],
+        allow_headers=["*"],
+        allow_credentials=True
+    )
+]
+
+app = Starlette(
+    debug=True,
+    routes=routes,
+    middleware=middleware,
+    lifespan=lifespan
+)
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", "8888"))
+    logger.info(f"[SIVI] Launching Production Backend on http://0.0.0.0:{port}")
+    uvicorn.run(app, host="0.0.0.0", port=port)

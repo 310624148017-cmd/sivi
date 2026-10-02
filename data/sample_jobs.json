@@ -1,0 +1,90 @@
+{
+  "jobs": [
+    {
+      "id": "techcorp-swe-intern-2026",
+      "company": "TechCorp",
+      "title": "Software Engineer Intern - AI & Autonomous Systems",
+      "location": "San Francisco, CA (Hybrid / Remote Option)",
+      "department": "Applied AI Engineering",
+      "type": "Internship (Summer / Fall 2026)",
+      "stipend": "$55 - $70 / hr",
+      "url": "http://localhost:8888/mock/techcorp/jobs/swe-intern",
+      "portal_type": "standard",
+      "description": "TechCorp is pioneering enterprise autonomous agents for software workflows. We are seeking an exceptional Software Engineer Intern to build multi-agent architectures, browser automation tools, and LLM-powered interfaces.",
+      "requirements": [
+        "Strong proficiency in Python (FastAPI/AsyncIO) and TypeScript (React/Next.js)",
+        "Hands-on experience with LLM APIs (Anthropic Claude, OpenAI, or local models)",
+        "Familiarity with browser automation tools (Stagehand, Playwright, Puppeteer, or CDP)",
+        "Understanding of Model Context Protocol (MCP) or tool-calling frameworks",
+        "Passionate about Human-in-the-Loop (HITL) safety and autonomous workflows"
+      ],
+      "responsibilities": [
+        "Develop self-healing browser automation primitives using Stagehand and Playwright",
+        "Design real-time streaming interfaces for LLM reasoning and agent telemetry",
+        "Integrate MCP servers for local file extraction and knowledge synthesis",
+        "Collaborate with safety researchers to enforce HITL guardrails on high-stakes actions"
+      ],
+      "form_fields": [
+        {"name": "full_name", "label": "Full Name", "type": "text", "required": true, "selector": "#full_name"},
+        {"name": "email", "label": "Email Address", "type": "email", "required": true, "selector": "#email"},
+        {"name": "phone", "label": "Phone Number", "type": "tel", "required": true, "selector": "#phone"},
+        {"name": "linkedin", "label": "LinkedIn Profile URL", "type": "url", "required": false, "selector": "#linkedin"},
+        {"name": "github", "label": "GitHub Profile URL", "type": "url", "required": false, "selector": "#github"},
+        {"name": "skills", "label": "Key Technical Skills", "type": "textarea", "required": true, "selector": "#skills"},
+        {"name": "cover_letter", "label": "Why TechCorp? (Cover Letter Snippet)", "type": "textarea", "required": true, "selector": "#cover_letter"},
+        {"name": "resume_file", "label": "Upload Resume (PDF)", "type": "file", "required": true, "selector": "#resume_upload"}
+      ]
+    },
+    {
+      "id": "scaleai-senior-ai-engineer-2026",
+      "company": "ScaleAI / Anthropic Partner",
+      "title": "Full Stack AI Applications Engineer",
+      "location": "San Francisco, CA / Remote",
+      "department": "Model Infrastructure",
+      "type": "Full-Time",
+      "stipend": "$160,000 - $210,000 / yr + Equity",
+      "url": "http://localhost:8888/mock/greenhouse/jobs/ai-engineer",
+      "portal_type": "ats_greenhouse",
+      "description": "Building the platform that powers enterprise foundation model evaluation and autonomous task execution. Looking for engineers experienced in agent telemetry and real-time streaming.",
+      "requirements": [
+        "Python (FastAPI, AsyncIO, PyTest)",
+        "Anthropic Claude API & Tool Calling",
+        "TypeScript, React & Next.js",
+        "Docker & Container Orchestration",
+        "High-reliability system architecture"
+      ],
+      "form_fields": [
+        {"name": "first_name", "label": "First Name", "type": "text", "required": true, "selector": "#first_name"},
+        {"name": "last_name", "label": "Last Name", "type": "text", "required": true, "selector": "#last_name"},
+        {"name": "email", "label": "Email", "type": "email", "required": true, "selector": "#email"},
+        {"name": "phone", "label": "Phone", "type": "tel", "required": true, "selector": "#phone"},
+        {"name": "resume", "label": "Attach Resume", "type": "file", "required": true, "selector": "#resume"},
+        {"name": "cover_letter", "label": "Cover Letter", "type": "textarea", "required": false, "selector": "#cover_letter"}
+      ]
+    },
+    {
+      "id": "cloudscale-lead-architect-2026",
+      "company": "CloudScale Systems",
+      "title": "Lead Cloud Infrastructure Architect",
+      "location": "Austin, TX / Remote",
+      "department": "Cloud Platforms",
+      "type": "Full-Time",
+      "stipend": "$175,000 - $230,000 / yr + Equity",
+      "url": "http://localhost:8888/mock/workday/jobs/cloud-architect",
+      "portal_type": "ats_workday",
+      "description": "Architect scalable cloud backends, container orchestration pipelines, and resilient multi-agent execution clusters for enterprise workloads.",
+      "requirements": [
+        "Kubernetes, Docker, Cloud Architecture (AWS/GCP)",
+        "Python, Go, or Rust distributed systems",
+        "CI/CD and infrastructure as code",
+        "Zero-trust security and compliance"
+      ],
+      "form_fields": [
+        {"name": "applicant_name", "label": "Legal Name", "type": "text", "required": true, "selector": "#applicant_name"},
+        {"name": "applicant_email", "label": "Email Address", "type": "email", "required": true, "selector": "#applicant_email"},
+        {"name": "work_authorization", "label": "Work Authorization", "type": "text", "required": true, "selector": "#work_auth"},
+        {"name": "salary_expectation", "label": "Desired Compensation", "type": "text", "required": false, "selector": "#salary"}
+      ]
+    }
+  ]
+}

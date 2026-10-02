@@ -1,0 +1,71 @@
+{
+  "version": "2.0.0",
+  "taxonomy_name": "SIVI AI & Software Engineering Skills Taxonomy",
+  "categories": {
+    "programming_languages": {
+      "name": "Programming Languages",
+      "skills": [
+        {"name": "Python", "aliases": ["python3", "py"]},
+        {"name": "TypeScript", "aliases": ["ts"]},
+        {"name": "JavaScript", "aliases": ["js", "es6", "node.js"]},
+        {"name": "Go", "aliases": ["golang"]},
+        {"name": "Rust", "aliases": ["rust-lang"]},
+        {"name": "C++", "aliases": ["cpp", "cplusplus"]},
+        {"name": "Java", "aliases": ["jdk", "jvm"]},
+        {"name": "SQL", "aliases": ["postgres", "mysql", "sqlite"]}
+      ]
+    },
+    "ai_and_agents": {
+      "name": "AI, Agents & Machine Learning",
+      "skills": [
+        {"name": "Anthropic Claude API", "aliases": ["claude-3-5-sonnet", "claude 3.5", "anthropic"]},
+        {"name": "OpenAI API", "aliases": ["gpt-4", "gpt-4o", "chatgpt"]},
+        {"name": "Stagehand SDK", "aliases": ["stagehand", "browserbase"]},
+        {"name": "Model Context Protocol", "aliases": ["mcp", "mcp server", "mcp client"]},
+        {"name": "Browser Automation", "aliases": ["playwright", "puppeteer", "selenium", "cdp"]},
+        {"name": "Human-in-the-Loop", "aliases": ["hitl", "safety gate", "human oversight"]},
+        {"name": "LangChain", "aliases": ["langchain-core", "langgraph"]},
+        {"name": "LlamaIndex", "aliases": ["llamaindex", "rag"]},
+        {"name": "Hugging Face", "aliases": ["transformers", "tokenizers", "bert", "distilbert"]},
+        {"name": "Vector Databases", "aliases": ["pinecone", "weaviate", "qdrant", "chroma"]},
+        {"name": "Prompt Engineering", "aliases": ["few-shot prompting", "chain of thought", "system prompts"]}
+      ]
+    },
+    "web_and_backend": {
+      "name": "Web & Backend Frameworks",
+      "skills": [
+        {"name": "FastAPI", "aliases": ["fast-api", "starlette", "pydantic"]},
+        {"name": "Next.js", "aliases": ["nextjs", "next.js 14", "next.js 15"]},
+        {"name": "React", "aliases": ["reactjs", "react.js", "react hooks"]},
+        {"name": "Tailwind CSS", "aliases": ["tailwind", "tailwindcss"]},
+        {"name": "WebSockets", "aliases": ["websocket", "ws", "socket.io"]},
+        {"name": "Node.js", "aliases": ["nodejs", "express", "express.js"]},
+        {"name": "GraphQL", "aliases": ["apollo", "relay"]},
+        {"name": "REST APIs", "aliases": ["restful api", "api design", "openapi", "swagger"]}
+      ]
+    },
+    "devops_and_cloud": {
+      "name": "DevOps, Cloud & Infrastructure",
+      "skills": [
+        {"name": "Docker", "aliases": ["dockerfile", "containerization"]},
+        {"name": "Docker Compose", "aliases": ["docker-compose"]},
+        {"name": "Kubernetes", "aliases": ["k8s", "kubectl", "helm"]},
+        {"name": "AWS", "aliases": ["amazon web services", "s3", "ec2", "ecs", "lambda"]},
+        {"name": "GCP", "aliases": ["google cloud platform", "cloud run", "gcs"]},
+        {"name": "CI/CD", "aliases": ["github actions", "gitlab ci", "jenkins"]},
+        {"name": "Redis", "aliases": ["redis-cache", "in-memory cache"]},
+        {"name": "PostgreSQL", "aliases": ["postgres", "psql", "relational db"]}
+      ]
+    },
+    "soft_and_methodologies": {
+      "name": "Methodologies & Soft Skills",
+      "skills": [
+        {"name": "Autonomous Systems Architecture", "aliases": ["agentic workflows", "autonomous agents"]},
+        {"name": "System Design", "aliases": ["distributed system design", "high availability"]},
+        {"name": "Agile / Scrum", "aliases": ["agile development", "sprint planning"]},
+        {"name": "Code Review & Quality", "aliases": ["peer review", "unit testing", "pytest", "jest"]},
+        {"name": "Technical Leadership", "aliases": ["cross-functional collaboration", "mentorship"]}
+      ]
+    }
+  }
+}

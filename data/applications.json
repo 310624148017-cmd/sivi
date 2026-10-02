@@ -1,0 +1,1000 @@
+[
+  {
+    "id": "app-techcorp-01",
+    "company": "TechCorp",
+    "role": "Software Engineer Intern - Autonomous Systems",
+    "department": "Applied AI Engineering",
+    "location": "San Francisco, CA (Hybrid)",
+    "url": "http://localhost:8888/mock/techcorp/jobs/swe-intern",
+    "status": "Interview",
+    "applied_at": "2026-09-29 07:38:57 UTC",
+    "updated_at": "2026-10-02 01:38:57 UTC",
+    "match_score": 98.0,
+    "notes": "System architecture interview with Director of Autonomous Agents scheduled.",
+    "interview": {
+      "scheduled": true,
+      "date": "2026-10-04",
+      "time": "14:00 PST",
+      "round": "Technical Deep Dive & Live Agent Architecture",
+      "interviewer": "Dr. Sarah Chen (Head of AI Systems)",
+      "meet_url": "https://meet.google.com/tc-sivi-arch"
+    },
+    "timeline": [
+      {
+        "date": "Sep 29, 07:38",
+        "event": "Autonomous Application Submitted",
+        "details": "SIVI automated form completion and HITL safety gate approved.",
+        "type": "success"
+      },
+      {
+        "date": "Sep 30, 07:38",
+        "event": "Application Reviewed",
+        "details": "Recruiter passed profile to AI Engineering team.",
+        "type": "info"
+      },
+      {
+        "date": "Oct 02, 01:38",
+        "event": "Interview Invitation",
+        "details": "Technical Deep Dive invitation sent via email.",
+        "type": "warning"
+      }
+    ]
+  },
+  {
+    "id": "app-anthropic-02",
+    "company": "ScaleAI / Anthropic Partner",
+    "role": "Full Stack AI Applications Engineer",
+    "department": "Model Infrastructure",
+    "location": "Remote / San Francisco",
+    "url": "https://boards.greenhouse.io/scaleai/jobs/4819231",
+    "status": "Reviewing",
+    "applied_at": "2026-09-27 07:38:57 UTC",
+    "updated_at": "2026-10-01 07:38:57 UTC",
+    "match_score": 94.0,
+    "notes": "Greenhouse ATS application completed. Resume parsed with 94% skills coverage.",
+    "interview": null,
+    "timeline": [
+      {
+        "date": "Sep 27, 07:38",
+        "event": "Application Submitted",
+        "details": "Autonomous Greenhouse submission with tailored Claude cover letter.",
+        "type": "success"
+      },
+      {
+        "date": "Oct 01, 07:38",
+        "event": "Profile Viewed by Hiring Manager",
+        "details": "LinkedIn and portfolio clicked 4 times from Mountain View, CA.",
+        "type": "info"
+      }
+    ]
+  },
+  {
+    "id": "app-stripe-03",
+    "company": "Stripe",
+    "role": "Frontend Platform Engineer (Design Systems)",
+    "department": "Developer Experience",
+    "location": "San Francisco, CA / Seattle, WA",
+    "url": "https://stripe.com/jobs/frontend-platform",
+    "status": "Interview",
+    "applied_at": "2026-10-01 07:38:57 UTC",
+    "updated_at": "2026-10-02 07:39:58 UTC",
+    "match_score": 89.0,
+    "notes": "Applied with custom cover letter highlighting Next.js 14 and real-time canvas UI.",
+    "interview": {
+      "scheduled": true,
+      "date": "2026-10-20",
+      "time": "10:00 PST",
+      "round": "Tech Deep Dive",
+      "interviewer": "Engineering Hiring Team",
+      "meet_url": "https://meet.google.com/tc-interview"
+    },
+    "timeline": [
+      {
+        "date": "Oct 01, 07:38",
+        "event": "Application Submitted",
+        "details": "Confirmation email #STR-APP-9021 received.",
+        "type": "success"
+      },
+      {
+        "date": "Oct 02, 07:39",
+        "event": "Interview Scheduled: Tech Deep Dive",
+        "details": "Date: 2026-10-20 at 10:00 PST with Engineering Hiring Team.",
+        "type": "warning"
+      }
+    ]
+  },
+  {
+    "id": "app-datadog-04",
+    "company": "Datadog",
+    "role": "Software Engineer - Telemetry & Agents",
+    "department": "Agent Runtime",
+    "location": "New York, NY / Remote",
+    "url": "https://datadoghq.com/careers/detail/?gh_jid=610923",
+    "status": "Reviewing",
+    "applied_at": "2026-09-25 07:38:57 UTC",
+    "updated_at": "2026-09-30 07:38:57 UTC",
+    "match_score": 91.0,
+    "notes": "Recruiter message received via LinkedIn acknowledging SIVI project repository.",
+    "interview": null,
+    "timeline": [
+      {
+        "date": "Sep 25, 07:38",
+        "event": "Application Submitted",
+        "details": "Direct portal upload.",
+        "type": "success"
+      },
+      {
+        "date": "Sep 30, 07:38",
+        "event": "Recruiter Screen Outreach",
+        "details": "Message: 'Impressive Stagehand and MCP open source work!'",
+        "type": "info"
+      }
+    ]
+  },
+  {
+    "id": "app-cloudscale-05",
+    "company": "CloudScale Systems",
+    "role": "Lead Cloud Infrastructure Architect",
+    "department": "Cloud Platforms",
+    "location": "Austin, TX (Remote)",
+    "url": "https://cloudscale.example.com/careers/cloud-architect",
+    "status": "Interview",
+    "applied_at": "2026-09-18 07:38:57 UTC",
+    "updated_at": "2026-10-02 09:52:10 UTC",
+    "match_score": 96.0,
+    "notes": "Offer letter received! Base: $145,000 + Equity + Sign-on bonus.",
+    "interview": {
+      "scheduled": true,
+      "date": "2026-10-15",
+      "time": "14:00 PST",
+      "round": "Technical Architecture",
+      "interviewer": "Engineering Hiring Team",
+      "meet_url": "https://meet.google.com/tc-interview"
+    },
+    "timeline": [
+      {
+        "date": "Sep 18, 07:38",
+        "event": "Application Submitted",
+        "details": "Batch mode application.",
+        "type": "success"
+      },
+      {
+        "date": "Sep 24, 07:38",
+        "event": "Technical Interview Cleared",
+        "details": "Score: 10/10 on Distributed Systems & Autonomous Agents.",
+        "type": "info"
+      },
+      {
+        "date": "Oct 01, 07:38",
+        "event": "\ud83c\udf89 Formal Offer Extended",
+        "details": "Official written offer dispatched via DocuSign.",
+        "type": "success"
+      },
+      {
+        "date": "Oct 02, 09:52",
+        "event": "Interview Scheduled: Technical Architecture",
+        "details": "Date: 2026-10-15 at 14:00 PST with Engineering Hiring Team.",
+        "type": "warning"
+      }
+    ]
+  },
+  {
+    "id": "app-4b1ea303",
+    "company": "TechCorp",
+    "role": "Software Engineer Intern - AI & Autonomous Systems",
+    "department": "Engineering",
+    "location": "Remote / Hybrid",
+    "url": "http://localhost:8888/mock/techcorp/jobs/swe-intern",
+    "status": "Interview",
+    "applied_at": "2026-10-02 07:40:16 UTC",
+    "updated_at": "2026-10-02 07:40:31 UTC",
+    "match_score": 99.0,
+    "notes": "Submitted autonomously via SIVI Agent with Professional cover letter.",
+    "interview": {
+      "scheduled": true,
+      "date": "2026-10-18",
+      "time": "15:00 PST",
+      "round": "System Architecture Deep Dive",
+      "interviewer": "Engineering Lead",
+      "meet_url": "https://meet.google.com/tc-interview"
+    },
+    "timeline": [
+      {
+        "date": "Oct 02, 07:40",
+        "event": "Autonomous Application Submitted",
+        "details": "Successfully submitted to TechCorp via SIVI Stagehand workflow.",
+        "type": "success"
+      },
+      {
+        "date": "Oct 02, 07:40",
+        "event": "Interview Scheduled: System Architecture Deep Dive",
+        "details": "Date: 2026-10-18 at 15:00 PST with Engineering Lead.",
+        "type": "warning"
+      }
+    ],
+    "submitted_payload": {
+      "confirmation_id": "#TC-APP-2026-9812",
+      "candidate_name": "Dharanidharan D",
+      "email": "dharanidharan.ai@example.com"
+    }
+  },
+  {
+    "id": "app-fc8869d3",
+    "company": "TechCorp",
+    "role": "Software Engineer Intern - AI & Autonomous Systems",
+    "department": "Engineering",
+    "location": "Remote / Hybrid",
+    "url": "http://localhost:8888/mock/techcorp/jobs/swe-intern",
+    "status": "Interview",
+    "applied_at": "2026-10-02 07:40:35 UTC",
+    "updated_at": "2026-10-02 09:51:53 UTC",
+    "match_score": 99.0,
+    "notes": "Submitted autonomously via SIVI Agent with Professional cover letter.",
+    "interview": {
+      "scheduled": true,
+      "date": "2026-10-15",
+      "time": "14:00 PST",
+      "round": "Technical Architecture",
+      "interviewer": "Engineering Hiring Team",
+      "meet_url": "https://meet.google.com/tc-interview"
+    },
+    "timeline": [
+      {
+        "date": "Oct 02, 07:40",
+        "event": "Autonomous Application Submitted",
+        "details": "Successfully submitted to TechCorp via SIVI Stagehand workflow.",
+        "type": "success"
+      },
+      {
+        "date": "Oct 02, 07:42",
+        "event": "Interview Scheduled: System Architecture Deep Dive",
+        "details": "Date: 2026-10-18 at 15:00 PST with Engineering Lead.",
+        "type": "warning"
+      },
+      {
+        "date": "Oct 02, 09:51",
+        "event": "Interview Scheduled: Technical Architecture",
+        "details": "Date: 2026-10-15 at 14:00 PST with Engineering Hiring Team.",
+        "type": "warning"
+      },
+      {
+        "date": "Oct 02, 09:51",
+        "event": "Interview Scheduled: Technical Architecture",
+        "details": "Date: 2026-10-15 at 14:00 PST with Engineering Hiring Team.",
+        "type": "warning"
+      }
+    ],
+    "submitted_payload": {
+      "confirmation_id": "#TC-APP-2026-9812",
+      "candidate_name": "Dharanidharan D",
+      "email": "dharanidharan.ai@example.com"
+    }
+  },
+  {
+    "id": "app-10e40bcb",
+    "company": "TechCorp",
+    "role": "Software Engineer Intern - AI & Autonomous Systems",
+    "department": "Engineering",
+    "location": "Remote / Hybrid",
+    "url": "http://localhost:8888/mock/techcorp/jobs/swe-intern",
+    "status": "Applied",
+    "applied_at": "2026-10-02 07:42:28 UTC",
+    "updated_at": "2026-10-02 07:42:28 UTC",
+    "match_score": 99.0,
+    "notes": "Submitted autonomously via SIVI Agent with Professional cover letter.",
+    "interview": null,
+    "timeline": [
+      {
+        "date": "Oct 02, 07:42",
+        "event": "Autonomous Application Submitted",
+        "details": "Successfully submitted to TechCorp via SIVI Stagehand workflow.",
+        "type": "success"
+      }
+    ],
+    "submitted_payload": {
+      "confirmation_id": "#TC-APP-2026-9812",
+      "candidate_name": "Dharanidharan D",
+      "email": "dharanidharan.ai@example.com"
+    }
+  },
+  {
+    "id": "app-91819b9d",
+    "company": "TechCorp",
+    "role": "Software Engineer Intern - AI & Autonomous Systems",
+    "department": "Engineering",
+    "location": "Remote / Hybrid",
+    "url": "http://localhost:8888/mock/techcorp/jobs/swe-intern",
+    "status": "Applied",
+    "applied_at": "2026-10-02 09:48:36 UTC",
+    "updated_at": "2026-10-02 09:48:36 UTC",
+    "match_score": 99.0,
+    "notes": "Submitted autonomously via SIVI Agent with Professional cover letter.",
+    "interview": null,
+    "timeline": [
+      {
+        "date": "Oct 02, 09:48",
+        "event": "Autonomous Application Submitted",
+        "details": "Successfully submitted to TechCorp via SIVI Stagehand workflow.",
+        "type": "success"
+      }
+    ],
+    "submitted_payload": {
+      "confirmation_id": "#TC-APP-2026-9812",
+      "candidate_name": "Dharanidharan D",
+      "email": "dharanidharan.ai@example.com"
+    }
+  },
+  {
+    "id": "app-51a21c5e",
+    "company": "TechCorp",
+    "role": "Software Engineer Intern - AI & Autonomous Systems",
+    "department": "Engineering",
+    "location": "Remote / Hybrid",
+    "url": "http://localhost:8888/mock/techcorp/jobs/swe-intern",
+    "status": "Applied",
+    "applied_at": "2026-10-02 09:48:36 UTC",
+    "updated_at": "2026-10-02 09:48:36 UTC",
+    "match_score": 99.0,
+    "notes": "Submitted autonomously via SIVI Agent with Professional cover letter.",
+    "interview": null,
+    "timeline": [
+      {
+        "date": "Oct 02, 09:48",
+        "event": "Autonomous Application Submitted",
+        "details": "Successfully submitted to TechCorp via SIVI Stagehand workflow.",
+        "type": "success"
+      }
+    ],
+    "submitted_payload": {
+      "confirmation_id": "#TC-APP-2026-9812",
+      "candidate_name": "Dharanidharan D",
+      "email": "dharanidharan.ai@example.com"
+    }
+  },
+  {
+    "id": "app-d720f9c0",
+    "company": "TechCorp",
+    "role": "Software Engineer Intern - AI & Autonomous Systems",
+    "department": "Engineering",
+    "location": "Remote / Hybrid",
+    "url": "http://localhost:8888/mock/workday/jobs/cloud-architect",
+    "status": "Applied",
+    "applied_at": "2026-10-02 10:29:42 UTC",
+    "updated_at": "2026-10-02 10:29:42 UTC",
+    "match_score": 99.0,
+    "notes": "Submitted autonomously via SIVI Agent with Formal cover letter.",
+    "interview": null,
+    "timeline": [
+      {
+        "date": "Oct 02, 10:29",
+        "event": "Autonomous Application Submitted",
+        "details": "Successfully submitted to TechCorp via SIVI Stagehand workflow.",
+        "type": "success"
+      }
+    ],
+    "submitted_payload": {
+      "confirmation_id": "#TC-APP-2026-9812",
+      "candidate_name": "Dharanidharan D",
+      "email": "dharanidharan.ai@example.com"
+    }
+  },
+  {
+    "id": "app-e836f83e",
+    "company": "TechCorp",
+    "role": "Software Engineer Intern - AI & Autonomous Systems",
+    "department": "Engineering",
+    "location": "Remote / Hybrid",
+    "url": "http://localhost:8888/mock/workday/jobs/cloud-architect",
+    "status": "Applied",
+    "applied_at": "2026-10-02 10:29:42 UTC",
+    "updated_at": "2026-10-02 10:29:42 UTC",
+    "match_score": 99.0,
+    "notes": "Submitted autonomously via SIVI Agent with Formal cover letter.",
+    "interview": null,
+    "timeline": [
+      {
+        "date": "Oct 02, 10:29",
+        "event": "Autonomous Application Submitted",
+        "details": "Successfully submitted to TechCorp via SIVI Stagehand workflow.",
+        "type": "success"
+      }
+    ],
+    "submitted_payload": {
+      "confirmation_id": "#TC-APP-2026-9812",
+      "candidate_name": "Dharanidharan D",
+      "email": "dharanidharan.ai@example.com"
+    }
+  },
+  {
+    "id": "app-d24c385e",
+    "company": "TechCorp",
+    "role": "Software Engineer Intern - AI & Autonomous Systems",
+    "department": "Engineering",
+    "location": "Remote / Hybrid",
+    "url": "http://localhost:8888/mock/techcorp/jobs/swe-intern",
+    "status": "Interview",
+    "applied_at": "2026-10-02 10:33:02 UTC",
+    "updated_at": "2026-10-02 10:33:12 UTC",
+    "match_score": 99.0,
+    "notes": "Submitted autonomously via SIVI Agent with Professional cover letter.",
+    "interview": null,
+    "timeline": [
+      {
+        "date": "Oct 02, 10:33",
+        "event": "Autonomous Application Submitted",
+        "details": "Successfully submitted to TechCorp via SIVI Stagehand workflow.",
+        "type": "success"
+      }
+    ],
+    "submitted_payload": {
+      "confirmation_id": "#TC-APP-2026-9812",
+      "candidate_name": "Dharanidharan D",
+      "email": "dharanidharan.ai@example.com"
+    }
+  },
+  {
+    "id": "app-6b4da89b",
+    "company": "TechCorp",
+    "role": "Software Engineer Intern - AI & Autonomous Systems",
+    "department": "Engineering",
+    "location": "Remote / Hybrid",
+    "url": "http://localhost:8888/mock/techcorp/jobs/swe-intern",
+    "status": "Applied",
+    "applied_at": "2026-10-02 10:33:02 UTC",
+    "updated_at": "2026-10-02 10:33:02 UTC",
+    "match_score": 99.0,
+    "notes": "Submitted autonomously via SIVI Agent with Professional cover letter.",
+    "interview": null,
+    "timeline": [
+      {
+        "date": "Oct 02, 10:33",
+        "event": "Autonomous Application Submitted",
+        "details": "Successfully submitted to TechCorp via SIVI Stagehand workflow.",
+        "type": "success"
+      }
+    ],
+    "submitted_payload": {
+      "confirmation_id": "#TC-APP-2026-9812",
+      "candidate_name": "Dharanidharan D",
+      "email": "dharanidharan.ai@example.com"
+    }
+  },
+  {
+    "id": "app-26757e28",
+    "company": "Adobe",
+    "role": "Python & Autonomous Systems Intern",
+    "department": "Engineering",
+    "location": "Remote / Hybrid",
+    "url": "http://localhost:8888/mock/unstop/internships/unstop-adobe-python-intern-2026",
+    "status": "Interview",
+    "applied_at": "2026-10-02 12:56:24 UTC",
+    "updated_at": "2026-10-02 14:26:50 UTC",
+    "match_score": 99.0,
+    "notes": "Submitted autonomously via SIVI Agent with Professional cover letter.",
+    "interview": {
+      "scheduled": true,
+      "date": "2026-10-18",
+      "time": "15:00 PST",
+      "round": "System Architecture Deep Dive",
+      "interviewer": "Engineering Lead",
+      "meet_url": "https://meet.google.com/tc-interview"
+    },
+    "timeline": [
+      {
+        "date": "Oct 02, 12:56",
+        "event": "Autonomous Application Submitted",
+        "details": "Successfully submitted to Adobe via SIVI Stagehand workflow.",
+        "type": "success"
+      },
+      {
+        "date": "Oct 02, 14:26",
+        "event": "Interview Scheduled: System Architecture Deep Dive",
+        "details": "Date: 2026-10-18 at 15:00 PST with Engineering Lead.",
+        "type": "warning"
+      }
+    ],
+    "submitted_payload": {
+      "confirmation_id": "#UNSTOP-2026-9842",
+      "candidate_name": "Dharanidharan D",
+      "email": "dharanidharan.ai@example.com"
+    }
+  },
+  {
+    "id": "app-7375dfdc",
+    "company": "Adobe",
+    "role": "Python & Autonomous Systems Intern",
+    "department": "Engineering",
+    "location": "Remote / Hybrid",
+    "url": "http://localhost:8888/mock/unstop/internships/unstop-adobe-python-intern-2026",
+    "status": "Applied",
+    "applied_at": "2026-10-02 12:56:24 UTC",
+    "updated_at": "2026-10-02 12:56:24 UTC",
+    "match_score": 99.0,
+    "notes": "Submitted autonomously via SIVI Agent with Professional cover letter.",
+    "interview": null,
+    "timeline": [
+      {
+        "date": "Oct 02, 12:56",
+        "event": "Autonomous Application Submitted",
+        "details": "Successfully submitted to Adobe via SIVI Stagehand workflow.",
+        "type": "success"
+      }
+    ],
+    "submitted_payload": {
+      "confirmation_id": "#UNSTOP-2026-9842",
+      "candidate_name": "Dharanidharan D",
+      "email": "dharanidharan.ai@example.com"
+    }
+  },
+  {
+    "id": "app-41769263",
+    "company": "TechCorp",
+    "role": "Software Engineer Intern - AI & Autonomous Systems",
+    "department": "Engineering",
+    "location": "Remote / Hybrid",
+    "url": "http://localhost:8888/mock/techcorp/jobs/swe-intern",
+    "status": "Applied",
+    "applied_at": "2026-10-02 14:26:55 UTC",
+    "updated_at": "2026-10-02 14:26:55 UTC",
+    "match_score": 99.0,
+    "notes": "Submitted autonomously via SIVI Agent with Professional cover letter.",
+    "interview": null,
+    "timeline": [
+      {
+        "date": "Oct 02, 14:26",
+        "event": "Autonomous Application Submitted",
+        "details": "Successfully submitted to TechCorp via SIVI Stagehand workflow.",
+        "type": "success"
+      }
+    ],
+    "submitted_payload": {
+      "confirmation_id": "#TC-APP-2026-9812",
+      "candidate_name": "Dharanidharan D",
+      "email": "dharanidharan.ai@example.com"
+    }
+  },
+  {
+    "id": "app-b3c185e5",
+    "company": "Flipkart",
+    "role": "AI & Machine Learning Engineering Intern",
+    "department": "Engineering",
+    "location": "Remote / Hybrid",
+    "url": "http://localhost:8888/mock/unstop/internships/unstop-flipkart-ai-intern-2026",
+    "status": "Applied",
+    "applied_at": "2026-10-02 14:27:01 UTC",
+    "updated_at": "2026-10-02 14:27:01 UTC",
+    "match_score": 75.0,
+    "notes": "Submitted autonomously via SIVI Agent with Professional cover letter.",
+    "interview": null,
+    "timeline": [
+      {
+        "date": "Oct 02, 14:27",
+        "event": "Autonomous Application Submitted",
+        "details": "Successfully submitted to Flipkart via SIVI Stagehand workflow.",
+        "type": "success"
+      }
+    ],
+    "submitted_payload": {
+      "confirmation_id": "#UNSTOP-2026-9842",
+      "candidate_name": "Dharanidharan D",
+      "email": "dharanidharan.ai@example.com"
+    }
+  },
+  {
+    "id": "app-f2f986f4",
+    "company": "TechCorp",
+    "role": "Software Engineer Intern - AI & Autonomous Systems",
+    "department": "Engineering",
+    "location": "Remote / Hybrid",
+    "url": "http://localhost:8888/mock/techcorp/jobs/swe-intern",
+    "status": "Applied",
+    "applied_at": "2026-10-02 14:44:56 UTC",
+    "updated_at": "2026-10-02 14:44:56 UTC",
+    "match_score": 99.0,
+    "notes": "Submitted autonomously via SIVI Agent with Professional cover letter.",
+    "interview": null,
+    "timeline": [
+      {
+        "date": "Oct 02, 14:44",
+        "event": "Autonomous Application Submitted",
+        "details": "Successfully submitted to TechCorp via SIVI Stagehand workflow.",
+        "type": "success"
+      }
+    ],
+    "submitted_payload": {
+      "confirmation_id": "#TC-APP-2026-9812",
+      "candidate_name": "Dharanidharan D",
+      "email": "dharanidharan.ai@example.com"
+    }
+  },
+  {
+    "id": "app-ad19fb38",
+    "company": "TechCorp",
+    "role": "Software Engineer Intern - AI & Autonomous Systems",
+    "department": "Engineering",
+    "location": "Remote / Hybrid",
+    "url": "http://localhost:8888/mock/techcorp/jobs/swe-intern",
+    "status": "Applied",
+    "applied_at": "2026-10-02 14:44:56 UTC",
+    "updated_at": "2026-10-02 14:44:56 UTC",
+    "match_score": 99.0,
+    "notes": "Submitted autonomously via SIVI Agent with Professional cover letter.",
+    "interview": null,
+    "timeline": [
+      {
+        "date": "Oct 02, 14:44",
+        "event": "Autonomous Application Submitted",
+        "details": "Successfully submitted to TechCorp via SIVI Stagehand workflow.",
+        "type": "success"
+      }
+    ],
+    "submitted_payload": {
+      "confirmation_id": "#TC-APP-2026-9812",
+      "candidate_name": "Dharanidharan D",
+      "email": "dharanidharan.ai@example.com"
+    }
+  },
+  {
+    "id": "app-11c45c23",
+    "company": "Flipkart",
+    "role": "AI & Machine Learning Engineering Intern",
+    "department": "Engineering",
+    "location": "Remote / Hybrid",
+    "url": "https://data.gov.in/resource/meity-ai-internship-2026",
+    "status": "Applied",
+    "applied_at": "2026-10-02 16:36:19 UTC",
+    "updated_at": "2026-10-02 16:36:19 UTC",
+    "match_score": 75.0,
+    "notes": "Submitted autonomously via SIVI Agent with Professional cover letter.",
+    "interview": null,
+    "timeline": [
+      {
+        "date": "Oct 02, 16:36",
+        "event": "Autonomous Application Submitted",
+        "details": "Successfully submitted to Flipkart via SIVI Stagehand workflow.",
+        "type": "success"
+      }
+    ],
+    "submitted_payload": {
+      "confirmation_id": "#UNSTOP-2026-9842",
+      "candidate_name": "Dharanidharan D",
+      "email": "dharanidharan.ai@example.com"
+    }
+  },
+  {
+    "id": "app-2dfcf14d",
+    "company": "Flipkart",
+    "role": "AI & Machine Learning Engineering Intern",
+    "department": "Engineering",
+    "location": "Remote / Hybrid",
+    "url": "https://data.gov.in/resource/meity-ai-internship-2026",
+    "status": "Applied",
+    "applied_at": "2026-10-02 16:36:19 UTC",
+    "updated_at": "2026-10-02 16:36:19 UTC",
+    "match_score": 75.0,
+    "notes": "Submitted autonomously via SIVI Agent with Professional cover letter.",
+    "interview": null,
+    "timeline": [
+      {
+        "date": "Oct 02, 16:36",
+        "event": "Autonomous Application Submitted",
+        "details": "Successfully submitted to Flipkart via SIVI Stagehand workflow.",
+        "type": "success"
+      }
+    ],
+    "submitted_payload": {
+      "confirmation_id": "#UNSTOP-2026-9842",
+      "candidate_name": "Dharanidharan D",
+      "email": "dharanidharan.ai@example.com"
+    }
+  },
+  {
+    "id": "app-af6dc061",
+    "company": "Swiggy",
+    "role": "Full Stack Developer Intern",
+    "department": "Engineering",
+    "location": "Remote / Hybrid",
+    "url": "http://localhost:8888/mock/unstop/internships/unstop-swiggy-fullstack-intern-2026",
+    "status": "Interview",
+    "applied_at": "2026-10-02 16:36:49 UTC",
+    "updated_at": "2026-10-02 16:50:17 UTC",
+    "match_score": 99.0,
+    "notes": "Submitted autonomously via SIVI Agent with Professional cover letter.",
+    "interview": {
+      "scheduled": true,
+      "date": "2026-10-18",
+      "time": "15:00 PST",
+      "round": "System Architecture Deep Dive",
+      "interviewer": "Engineering Lead",
+      "meet_url": "https://meet.google.com/tc-interview"
+    },
+    "timeline": [
+      {
+        "date": "Oct 02, 16:36",
+        "event": "Autonomous Application Submitted",
+        "details": "Successfully submitted to Swiggy via SIVI Stagehand workflow.",
+        "type": "success"
+      },
+      {
+        "date": "Oct 02, 16:50",
+        "event": "Interview Scheduled: System Architecture Deep Dive",
+        "details": "Date: 2026-10-18 at 15:00 PST with Engineering Lead.",
+        "type": "warning"
+      }
+    ],
+    "submitted_payload": {
+      "confirmation_id": "#UNSTOP-2026-9842",
+      "candidate_name": "Dharanidharan D",
+      "email": "dharanidharan.ai@example.com"
+    }
+  },
+  {
+    "id": "app-f7af2175",
+    "company": "Swiggy",
+    "role": "Full Stack Developer Intern",
+    "department": "Engineering",
+    "location": "Remote / Hybrid",
+    "url": "http://localhost:8888/mock/unstop/internships/unstop-swiggy-fullstack-intern-2026",
+    "status": "Applied",
+    "applied_at": "2026-10-02 16:36:49 UTC",
+    "updated_at": "2026-10-02 16:36:49 UTC",
+    "match_score": 99.0,
+    "notes": "Submitted autonomously via SIVI Agent with Professional cover letter.",
+    "interview": null,
+    "timeline": [
+      {
+        "date": "Oct 02, 16:36",
+        "event": "Autonomous Application Submitted",
+        "details": "Successfully submitted to Swiggy via SIVI Stagehand workflow.",
+        "type": "success"
+      }
+    ],
+    "submitted_payload": {
+      "confirmation_id": "#UNSTOP-2026-9842",
+      "candidate_name": "Dharanidharan D",
+      "email": "dharanidharan.ai@example.com"
+    }
+  },
+  {
+    "id": "app-56788e61",
+    "company": "TechCorp",
+    "role": "Software Engineer Intern - AI & Autonomous Systems",
+    "department": "Engineering",
+    "location": "Remote / Hybrid",
+    "url": "http://localhost:8888/mock/techcorp/jobs/swe-intern",
+    "status": "Applied",
+    "applied_at": "2026-10-02 16:50:22 UTC",
+    "updated_at": "2026-10-02 16:50:22 UTC",
+    "match_score": 99.0,
+    "notes": "Submitted autonomously via SIVI Agent with Professional cover letter.",
+    "interview": null,
+    "timeline": [
+      {
+        "date": "Oct 02, 16:50",
+        "event": "Autonomous Application Submitted",
+        "details": "Successfully submitted to TechCorp via SIVI Stagehand workflow.",
+        "type": "success"
+      }
+    ],
+    "submitted_payload": {
+      "confirmation_id": "#TC-APP-2026-9812",
+      "candidate_name": "Dharanidharan D",
+      "email": "dharanidharan.ai@example.com"
+    }
+  },
+  {
+    "id": "app-d1e2db5d",
+    "company": "MeitY (Digital India Bhashini AI Mission)",
+    "role": "Generative AI & Indic Language Model Fellow",
+    "department": "Engineering",
+    "location": "Remote / Hybrid",
+    "url": "http://localhost:8888/mock/unstop/internships/gov-meity-genai-fellow-2026",
+    "status": "Applied",
+    "applied_at": "2026-10-02 16:50:27 UTC",
+    "updated_at": "2026-10-02 16:50:27 UTC",
+    "match_score": 45.0,
+    "notes": "Submitted autonomously via SIVI Agent with Professional cover letter.",
+    "interview": null,
+    "timeline": [
+      {
+        "date": "Oct 02, 16:50",
+        "event": "Autonomous Application Submitted",
+        "details": "Successfully submitted to MeitY (Digital India Bhashini AI Mission) via SIVI Stagehand workflow.",
+        "type": "success"
+      }
+    ],
+    "submitted_payload": {
+      "confirmation_id": "#UNSTOP-2026-9842",
+      "candidate_name": "Dharanidharan D",
+      "email": "dharanidharan.ai@example.com"
+    }
+  },
+  {
+    "id": "app-872c2efd",
+    "company": "DRDO CAIR",
+    "role": "Autonomous Systems & Sensor Fusion Intern",
+    "department": "Engineering",
+    "location": "Remote / Hybrid",
+    "url": "http://localhost:8888/mock/unstop/internships/gov-drdo-robotics-2026",
+    "status": "Interview",
+    "applied_at": "2026-10-02 16:52:33 UTC",
+    "updated_at": "2026-10-02 16:55:42 UTC",
+    "match_score": 99.0,
+    "notes": "Submitted autonomously via SIVI Agent with Professional cover letter.",
+    "interview": {
+      "scheduled": true,
+      "date": "2026-10-18",
+      "time": "15:00 PST",
+      "round": "System Architecture Deep Dive",
+      "interviewer": "Engineering Lead",
+      "meet_url": "https://meet.google.com/tc-interview"
+    },
+    "timeline": [
+      {
+        "date": "Oct 02, 16:52",
+        "event": "Autonomous Application Submitted",
+        "details": "Successfully submitted to DRDO CAIR via SIVI Stagehand workflow.",
+        "type": "success"
+      },
+      {
+        "date": "Oct 02, 16:55",
+        "event": "Interview Scheduled: System Architecture Deep Dive",
+        "details": "Date: 2026-10-18 at 15:00 PST with Engineering Lead.",
+        "type": "warning"
+      }
+    ],
+    "submitted_payload": {
+      "confirmation_id": "#UNSTOP-2026-9842",
+      "candidate_name": "Dharanidharan D",
+      "email": "dharanidharan.ai@example.com"
+    }
+  },
+  {
+    "id": "app-ac180e06",
+    "company": "DRDO CAIR",
+    "role": "Autonomous Systems & Sensor Fusion Intern",
+    "department": "Engineering",
+    "location": "Remote / Hybrid",
+    "url": "http://localhost:8888/mock/unstop/internships/gov-drdo-robotics-2026",
+    "status": "Applied",
+    "applied_at": "2026-10-02 16:52:33 UTC",
+    "updated_at": "2026-10-02 16:52:33 UTC",
+    "match_score": 99.0,
+    "notes": "Submitted autonomously via SIVI Agent with Professional cover letter.",
+    "interview": null,
+    "timeline": [
+      {
+        "date": "Oct 02, 16:52",
+        "event": "Autonomous Application Submitted",
+        "details": "Successfully submitted to DRDO CAIR via SIVI Stagehand workflow.",
+        "type": "success"
+      }
+    ],
+    "submitted_payload": {
+      "confirmation_id": "#UNSTOP-2026-9842",
+      "candidate_name": "Dharanidharan D",
+      "email": "dharanidharan.ai@example.com"
+    }
+  },
+  {
+    "id": "app-de7751fb",
+    "company": "TechCorp",
+    "role": "Software Engineer Intern - AI & Autonomous Systems",
+    "department": "Engineering",
+    "location": "Remote / Hybrid",
+    "url": "http://localhost:8888/mock/techcorp/jobs/swe-intern",
+    "status": "Applied",
+    "applied_at": "2026-10-02 16:55:47 UTC",
+    "updated_at": "2026-10-02 16:55:47 UTC",
+    "match_score": 99.0,
+    "notes": "Submitted autonomously via SIVI Agent with Professional cover letter.",
+    "interview": null,
+    "timeline": [
+      {
+        "date": "Oct 02, 16:55",
+        "event": "Autonomous Application Submitted",
+        "details": "Successfully submitted to TechCorp via SIVI Stagehand workflow.",
+        "type": "success"
+      }
+    ],
+    "submitted_payload": {
+      "confirmation_id": "#TC-APP-2026-9812",
+      "candidate_name": "Dharanidharan D",
+      "email": "dharanidharan.ai@example.com"
+    }
+  },
+  {
+    "id": "app-d0fd7bdc",
+    "company": "MeitY (Digital India Bhashini AI Mission)",
+    "role": "Generative AI & Indic Language Model Fellow",
+    "department": "Engineering",
+    "location": "Remote / Hybrid",
+    "url": "http://localhost:8888/mock/unstop/internships/gov-meity-genai-fellow-2026",
+    "status": "Interview",
+    "applied_at": "2026-10-02 16:55:52 UTC",
+    "updated_at": "2026-10-02 17:01:11 UTC",
+    "match_score": 45.0,
+    "notes": "Submitted autonomously via SIVI Agent with Professional cover letter.",
+    "interview": {
+      "scheduled": true,
+      "date": "2026-10-18",
+      "time": "15:00 PST",
+      "round": "System Architecture Deep Dive",
+      "interviewer": "Engineering Lead",
+      "meet_url": "https://meet.google.com/tc-interview"
+    },
+    "timeline": [
+      {
+        "date": "Oct 02, 16:55",
+        "event": "Autonomous Application Submitted",
+        "details": "Successfully submitted to MeitY (Digital India Bhashini AI Mission) via SIVI Stagehand workflow.",
+        "type": "success"
+      },
+      {
+        "date": "Oct 02, 17:01",
+        "event": "Interview Scheduled: System Architecture Deep Dive",
+        "details": "Date: 2026-10-18 at 15:00 PST with Engineering Lead.",
+        "type": "warning"
+      }
+    ],
+    "submitted_payload": {
+      "confirmation_id": "#UNSTOP-2026-9842",
+      "candidate_name": "Dharanidharan D",
+      "email": "dharanidharan.ai@example.com"
+    }
+  },
+  {
+    "id": "app-9d609d8e",
+    "company": "TechCorp",
+    "role": "Software Engineer Intern - AI & Autonomous Systems",
+    "department": "Engineering",
+    "location": "Remote / Hybrid",
+    "url": "http://localhost:8888/mock/techcorp/jobs/swe-intern",
+    "status": "Applied",
+    "applied_at": "2026-10-02 17:01:16 UTC",
+    "updated_at": "2026-10-02 17:01:16 UTC",
+    "match_score": 99.0,
+    "notes": "Submitted autonomously via SIVI Agent with Professional cover letter.",
+    "interview": null,
+    "timeline": [
+      {
+        "date": "Oct 02, 17:01",
+        "event": "Autonomous Application Submitted",
+        "details": "Successfully submitted to TechCorp via SIVI Stagehand workflow.",
+        "type": "success"
+      }
+    ],
+    "submitted_payload": {
+      "confirmation_id": "#TC-APP-2026-9812",
+      "candidate_name": "Dharanidharan D",
+      "email": "dharanidharan.ai@example.com"
+    }
+  },
+  {
+    "id": "app-d8500c22",
+    "company": "MeitY (Digital India Bhashini AI Mission)",
+    "role": "Generative AI & Indic Language Model Fellow",
+    "department": "Engineering",
+    "location": "Remote / Hybrid",
+    "url": "http://localhost:8888/mock/unstop/internships/gov-meity-genai-fellow-2026",
+    "status": "Applied",
+    "applied_at": "2026-10-02 17:01:21 UTC",
+    "updated_at": "2026-10-02 17:01:21 UTC",
+    "match_score": 45.0,
+    "notes": "Submitted autonomously via SIVI Agent with Professional cover letter.",
+    "interview": null,
+    "timeline": [
+      {
+        "date": "Oct 02, 17:01",
+        "event": "Autonomous Application Submitted",
+        "details": "Successfully submitted to MeitY (Digital India Bhashini AI Mission) via SIVI Stagehand workflow.",
+        "type": "success"
+      }
+    ],
+    "submitted_payload": {
+      "confirmation_id": "#UNSTOP-2026-9842",
+      "candidate_name": "Dharanidharan D",
+      "email": "dharanidharan.ai@example.com"
+    }
+  }
+]
