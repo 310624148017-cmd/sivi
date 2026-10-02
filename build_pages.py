@@ -122,6 +122,11 @@ new_appr = """if (!ws || ws.readyState !== WebSocket.OPEN) {
       if (ws && ws.readyState === WebSocket.OPEN) {"""
 clean_html = clean_html.replace(orig_appr, new_appr)
 
+clean_html = clean_html.replace(
+    "card.innerHTML = `<div class=\"action-type-badge\">${type}</div><div>${msg}</div>`;",
+    "const displayMsg = (typeof msg === 'object' && msg !== null) ? (msg.message || msg.status || JSON.stringify(msg)) : ('' + msg);\\n      card.innerHTML = `<div class=\"action-type-badge\">${type}</div><div>${displayMsg}</div>`;"
+)
+
 static_script = f"""
   <script>
     function b64Decode(str) {{
@@ -150,7 +155,14 @@ static_script = f"""
           }}
         }}
       }}
-      iframe.srcdoc = matched || window.STATIC_PORTALS['techcorp'];
+      const portalContent = matched || window.STATIC_PORTALS['techcorp'];
+      try {{
+        iframe.removeAttribute('srcdoc');
+        const blob = new Blob([portalContent], {{ type: 'text/html;charset=utf-8' }});
+        iframe.src = URL.createObjectURL(blob);
+      }} catch (err) {{
+        iframe.srcdoc = portalContent;
+      }}
     }}
 
     function runClientAutonomousSimulation(goal, jobUrl, tone) {{

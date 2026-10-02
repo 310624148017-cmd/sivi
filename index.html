@@ -3008,7 +3008,14 @@ Launch autonomous agent execution now?`);
           }
         }
       }
-      iframe.srcdoc = matched || window.STATIC_PORTALS['techcorp'];
+      const portalContent = matched || window.STATIC_PORTALS['techcorp'];
+      try {
+        iframe.removeAttribute('srcdoc');
+        const blob = new Blob([portalContent], { type: 'text/html;charset=utf-8' });
+        iframe.src = URL.createObjectURL(blob);
+      } catch (err) {
+        iframe.srcdoc = portalContent;
+      }
     }
 
     function runClientAutonomousSimulation(goal, jobUrl, tone) {
